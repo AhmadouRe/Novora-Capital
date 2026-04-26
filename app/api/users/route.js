@@ -13,10 +13,11 @@ async function requireSession(request) {
 export async function GET(request) {
   try {
     const session = await requireSession(request);
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const users = await getList('users:list');
-    const safe = users.map(({ pinHash, salt, ...u }) => u);
-    return NextResponse.json(safe);
+    if (!session) {
+      return NextResponse.json(users.filter(u => u.active).map(u => ({ id: u.id, name: u.name, color: u.color, active: u.active })));
+    }
+    return NextResponse.json(users.map(({ pinHash, salt, ...u }) => u));
   } catch {
     return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }

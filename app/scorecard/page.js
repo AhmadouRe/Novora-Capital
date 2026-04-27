@@ -260,6 +260,9 @@ function computeScore({ motivation, decisionMaker, multipleOwners, timeline, acc
 
 const OUTCOMES = ['Pending', 'Under Contract', 'Dead-Price', 'Dead-Motivation', 'Dead-No Access', 'Closed', 'Follow-Up Later'];
 
+const STATE_ABBR = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
+const STATE_COMPLIANCE = { IL:'red',NE:'red',KY:'red',GA:'red',SC:'red',OK:'red',VA:'red', OH:'yellow',MD:'yellow',TN:'yellow',ND:'yellow',CT:'yellow',MN:'yellow',IA:'yellow' };
+
 export default function ScorecardPage() {
   const router = useRouter();
   const [isMobile, setIsMobile] = useState(false);
@@ -315,6 +318,14 @@ export default function ScorecardPage() {
 
   const requiredFields = [motivation, timeline, accessType, occupancy, condition];
   const missingCount = requiredFields.filter(f => !f).length;
+
+  const stateUpper = stateVal.toUpperCase().trim();
+  const complianceLevel = STATE_ABBR.includes(stateUpper) ? (STATE_COMPLIANCE[stateUpper] || 'green') : null;
+  const complianceBanner = complianceLevel ? {
+    red:    { bg:'var(--red-faint)',   border:'var(--red-border)',  color:'var(--red)',   icon:'⛔', msg:`${stateUpper} is a restricted state. Novation is not permitted. Do not present novation as an option.` },
+    yellow: { bg:'var(--gold-faint)',  border:'var(--gold-border)', color:'var(--gold)',  icon:'⚠',  msg:`${stateUpper} requires additional compliance steps for novation. Confirm attorney review before proceeding.` },
+    green:  { bg:'var(--green-faint)', border:'var(--green-border)',color:'var(--green)', icon:'✓',  msg:`${stateUpper} — No known novation restrictions. Standard process applies.` },
+  }[complianceLevel] : null;
 
   const reset = () => {
     setStreetAddr(''); setCity(''); setStateVal(''); setZip(''); setCounty('');
@@ -374,6 +385,13 @@ export default function ScorecardPage() {
         </div>
       </nav>
 
+      {complianceBanner && (
+        <div style={{ position: 'sticky', top: 58, zIndex: 40, background: complianceBanner.bg, borderBottom: `1px solid ${complianceBanner.border}`, padding: '10px 24px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 16 }}>{complianceBanner.icon}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: complianceBanner.color }}>{complianceBanner.msg}</span>
+        </div>
+      )}
+
       <div style={{ maxWidth: 860, margin: '0 auto', padding: `${isMobile ? 16 : 24}px ${p}px` }}>
 
         <SCard title="Property" color="var(--gold)" accent="var(--gold)">
@@ -389,7 +407,7 @@ export default function ScorecardPage() {
 
         <SCard title="Lead Qualification" color="var(--purple)" accent="var(--purple)" sub="Complete every field — required for recommendation">
           <div style={{ marginBottom: 18 }}>
-            <Label req>Motivation Level</Label>
+            <Label>Motivation Level</Label>
             <Radio value={motivation} onChange={setMotivation} opts={[
               { v: 'needs', l: 'Needs to sell', sub: 'Real problem — financial pressure, life event, urgency' },
               { v: 'wants', l: 'Wants to sell', sub: 'Interested but no major urgency — flexible on timing' },
@@ -398,10 +416,10 @@ export default function ScorecardPage() {
             ]} />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 14, marginBottom: 18 }}>
-            <div><Label req>Occupancy</Label><Sel value={occupancy} onChange={setOccupancy} placeholder="Select…" opts={[{ v: 'vacant', l: 'Vacant' }, { v: 'owner', l: 'Owner Occupied' }, { v: 'tenant', l: 'Tenant Occupied' }]} /></div>
-            <div><Label req>Property Condition</Label><Sel value={condition} onChange={setCondition} placeholder="Select…" opts={[{ v: 'moveIn', l: 'Move-In Ready' }, { v: 'light', l: 'Light Rehab' }, { v: 'medium', l: 'Medium Rehab' }, { v: 'major', l: 'Major Rehab / Full Gut' }]} /></div>
-            <div><Label req>Selling Timeline</Label><Sel value={timeline} onChange={setTimeline} placeholder="Select…" opts={[{ v: 'asap', l: 'ASAP — needs to close immediately' }, { v: '30d', l: 'Within 30 days' }, { v: '60d', l: '30-60 days' }, { v: '90d', l: '60-90 days' }, { v: '6mo', l: '3-6 months' }, { v: 'whenever', l: 'Whenever — no real urgency' }]} /></div>
-            <div><Label req>Access Type</Label><Sel value={accessType} onChange={setAccessType} placeholder="Select…" opts={[{ v: 'lockbox', l: 'Lockbox — easy access anytime' }, { v: 'vacant', l: 'Vacant — access with notice' }, { v: 'appt', l: 'By appointment with seller' }, { v: 'tenant', l: 'Tenant occupied — needs coordination' }, { v: 'none', l: 'No access — blocked' }]} /></div>
+            <div><Label>Occupancy</Label><Sel value={occupancy} onChange={setOccupancy} placeholder="Select…" opts={[{ v: 'vacant', l: 'Vacant' }, { v: 'owner', l: 'Owner Occupied' }, { v: 'tenant', l: 'Tenant Occupied' }]} /></div>
+            <div><Label>Property Condition</Label><Sel value={condition} onChange={setCondition} placeholder="Select…" opts={[{ v: 'moveIn', l: 'Move-In Ready' }, { v: 'light', l: 'Light Rehab' }, { v: 'medium', l: 'Medium Rehab' }, { v: 'major', l: 'Major Rehab / Full Gut' }]} /></div>
+            <div><Label>Selling Timeline</Label><Sel value={timeline} onChange={setTimeline} placeholder="Select…" opts={[{ v: 'asap', l: 'ASAP — needs to close immediately' }, { v: '30d', l: 'Within 30 days' }, { v: '60d', l: '30-60 days' }, { v: '90d', l: '60-90 days' }, { v: '6mo', l: '3-6 months' }, { v: 'whenever', l: 'Whenever — no real urgency' }]} /></div>
+            <div><Label>Access Type</Label><Sel value={accessType} onChange={setAccessType} placeholder="Select…" opts={[{ v: 'lockbox', l: 'Lockbox — easy access anytime' }, { v: 'vacant', l: 'Vacant — access with notice' }, { v: 'appt', l: 'By appointment with seller' }, { v: 'tenant', l: 'Tenant occupied — needs coordination' }, { v: 'none', l: 'No access — blocked' }]} /></div>
           </div>
           <div style={{ marginBottom: 16 }}>
             <Label>Major Issues <span style={{ fontWeight: 400, color: 'var(--text3)', textTransform: 'none', letterSpacing: 0 }}>(optional)</span></Label>

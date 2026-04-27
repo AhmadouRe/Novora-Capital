@@ -113,6 +113,17 @@ export default function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState('expenses');
 
+  /* split allocation */
+  const [splits, setSplits] = useState([]);
+  const [showAllocationEdit, setShowAllocationEdit] = useState(false);
+  const [allocationPinInput, setAllocationPinInput] = useState('');
+  const [allocationPinError, setAllocationPinError] = useState('');
+  const [allocationUnlocked, setAllocationUnlocked] = useState(false);
+  const [editSplits, setEditSplits] = useState({});
+  const [splitSaveError, setSplitSaveError] = useState('');
+  const [splitSaveSuccess, setSplitSaveSuccess] = useState(false);
+  const allocationPinRef = useRef(null);
+
   /* edit expense inline */
   const [editEntryId, setEditEntryId] = useState(null);
   const [editEntryVendor, setEditEntryVendor] = useState('');
@@ -191,6 +202,14 @@ export default function ExpensesPage() {
   useEffect(() => {
     if (session?.access?.expenses) reload();
   }, [session, reload]);
+
+  useEffect(() => {
+    if (session?.access?.revenue) {
+      fetch('/api/revenue/splits').then(r => r.ok ? r.json() : []).then(d => {
+        if (Array.isArray(d)) setSplits(d);
+      }).catch(() => {});
+    }
+  }, [session]);
 
   /* ── computed ── */
   const spent = useCallback((key) => {
@@ -296,6 +315,64 @@ export default function ExpensesPage() {
     setShowRecurringModal(true);
   }
 
+  /* ── split allocation helpers ── */
+  function openAllocationEdit() {
+    setShowAllocationEdit(true);
+    setAllocationPinInput('');
+    setAllocationPinError('');
+    setAllocationUnlocked(false);
+    setEditSplits({});
+    setSplitSaveError('');
+    setSplitSaveSuccess(false);
+    setTimeout(() => allocationPinRef.current?.focus(), 50);
+  }
+
+  function cancelAllocationEdit() {
+    setShowAllocationEdit(false);
+    setAllocationPinInput('');
+    setAllocationPinError('');
+    setAllocationUnlocked(false);
+    setEditSplits({});
+    setSplitSaveError('');
+    setSplitSaveSuccess(false);
+  }
+
+  function unlockAllocation() {
+    if (allocationPinInput === '2608') {
+      setAllocationUnlocked(true);
+      setAllocationPinError('');
+      const es = {};
+      ['Marketing','Reserve','Operating'].forEach(label => {
+        const found = splits.find(s => s.label === label);
+        es[label] = found ? String(found.pct) : '';
+      });
+      setEditSplits(es);
+    } else {
+      setAllocationPinError('Incorrect PIN');
+      setAllocationPinInput('');
+      setTimeout(() => allocationPinRef.current?.focus(), 50);
+    }
+  }
+
+  async function saveSplitAllocation() {
+    const editableLabels = ['Marketing','Reserve','Operating'];
+    const editableSum = editableLabels.reduce((s, l) => s + toN(editSplits[l]), 0);
+    const lockedSum = splits.filter(s => !editableLabels.includes(s.label)).reduce((s, sp) => s + toN(sp.pct), 0);
+    const total = editableSum + lockedSum;
+    if (Math.round(total) !== 100) { setSplitSaveError(`Total is ${total.toFixed(1)}% — must equal 100%`); return; }
+    const updated = splits.map(sp => editableLabels.includes(sp.label) ? { ...sp, pct: toN(editSplits[sp.label]) } : sp);
+    const res = await fetch('/api/revenue/splits', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updated) });
+    if (res.ok) {
+      setSplits(updated);
+      setSplitSaveSuccess(true);
+      setSplitSaveError('');
+      setTimeout(() => { setSplitSaveSuccess(false); cancelAllocationEdit(); }, 2000);
+    } else {
+      const err = await res.json().catch(() => ({}));
+      setSplitSaveError(err.error || 'Save failed');
+    }
+  }
+
   /* ── guards ── */
   if (loading) return <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)' }}>Loading…</div>;
   if (!session) { router.push('/'); return null; }
@@ -376,6 +453,106 @@ export default function ExpensesPage() {
             );
           })}
         </div>
+
+        {/* Split Allocation */}
+        {splits.length > 0 && (
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 18, marginBottom: 24 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text3)' }}>Split Allocation</div>
+              {!showAllocationEdit && session?.access?.manageTeam && (
+                <button onClick={openAllocationEdit} style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface2)', color: 'var(--text2)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>Edit</button>
+              )}
+            </div>
+
+            {/* Current splits display */}
+            {!allocationUnlocked && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: showAllocationEdit ? 14 : 0 }}>
+                {splits.map(sp => (
+                  <div key={sp.label} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 8, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: sp.color || 'var(--text3)', flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, color: 'var(--text2)' }}>{sp.label}</span>
+                    <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{sp.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* PIN entry panel */}
+            {showAllocationEdit && !allocationUnlocked && (
+              <div style={{ marginTop: 14, padding: 16, background: 'var(--surface2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>Enter admin PIN to edit split allocation</div>
+                <input
+                  ref={allocationPinRef}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={allocationPinInput}
+                  onChange={e => setAllocationPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  onKeyDown={e => { if (e.key === 'Enter') unlockAllocation(); }}
+                  placeholder="PIN"
+                  style={{ width: 120, height: 48, textAlign: 'center', letterSpacing: '0.3em', fontFamily: 'JetBrains Mono,monospace', fontSize: 20, fontWeight: 700, padding: '0 12px', borderRadius: 8, background: 'var(--surface3)', border: `1px solid ${allocationPinError ? 'var(--red)' : 'var(--border)'}`, color: 'var(--text)', outline: 'none', boxSizing: 'border-box', display: 'block', marginBottom: 8 }}
+                />
+                {allocationPinError && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 10 }}>{allocationPinError}</div>}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={unlockAllocation} style={{ padding: '8px 18px', borderRadius: 7, border: 'none', background: 'var(--orange)', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>Unlock</button>
+                  <button onClick={cancelAllocationEdit} style={{ padding: '8px 18px', borderRadius: 7, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Unlocked edit panel */}
+            {allocationUnlocked && (
+              <div style={{ marginTop: 14 }}>
+                {(() => {
+                  const editableLabels = ['Marketing','Reserve','Operating'];
+                  const editableSum = editableLabels.reduce((s, l) => s + toN(editSplits[l] || '0'), 0);
+                  const lockedSum = splits.filter(sp => !editableLabels.includes(sp.label)).reduce((s, sp) => s + toN(sp.pct), 0);
+                  const total = editableSum + lockedSum;
+                  const totalOk = Math.round(total) === 100;
+                  return (
+                    <>
+                      {splits.map(sp => {
+                        const isEditable = editableLabels.includes(sp.label);
+                        return (
+                          <div key={sp.label} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                            <div style={{ width: 10, height: 10, borderRadius: '50%', background: sp.color || 'var(--text3)', flexShrink: 0 }} />
+                            <span style={{ flex: 1, fontSize: 14, color: 'var(--text)' }}>{sp.label}</span>
+                            {isEditable ? (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <input
+                                  type="text" inputMode="numeric"
+                                  value={editSplits[sp.label] || ''}
+                                  onChange={e => setEditSplits(prev => ({ ...prev, [sp.label]: e.target.value.replace(/[^0-9.]/g, '') }))}
+                                  style={{ width: 70, height: 36, textAlign: 'center', fontFamily: 'JetBrains Mono,monospace', fontSize: 15, fontWeight: 700, padding: '0 8px', borderRadius: 6, background: 'var(--surface3)', border: '1px solid var(--border)', color: 'var(--text)', outline: 'none', boxSizing: 'border-box' }}
+                                />
+                                <span style={{ fontSize: 14, color: 'var(--text2)' }}>%</span>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 15, fontWeight: 700, color: 'var(--text2)' }}>{sp.pct}%</span>
+                                <span style={{ fontSize: 12, color: 'var(--text3)' }}>🔒</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0' }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text2)' }}>Total</span>
+                        <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 16, fontWeight: 800, color: totalOk ? 'var(--green)' : 'var(--red)' }}>{total.toFixed(1)}%</span>
+                      </div>
+                      {splitSaveError && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 10 }}>{splitSaveError}</div>}
+                      {splitSaveSuccess && <div style={{ color: 'var(--green)', fontSize: 13, fontWeight: 700, marginBottom: 10 }}>✓ Saved!</div>}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={saveSplitAllocation} style={{ padding: '9px 20px', borderRadius: 7, border: 'none', background: totalOk ? 'var(--orange)' : 'var(--surface3)', color: totalOk ? '#fff' : 'var(--text3)', fontWeight: 700, fontSize: 13, cursor: totalOk ? 'pointer' : 'default' }}>Save Allocation</button>
+                        <button onClick={cancelAllocationEdit} style={{ padding: '9px 20px', borderRadius: 7, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Tab bar */}
         <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 20 }}>

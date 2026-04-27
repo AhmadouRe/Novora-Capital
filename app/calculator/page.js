@@ -97,6 +97,7 @@ export default function OfferGenerator(){
   const [novCushion,setNovCushion]=useState('7500');
   const [novBuffer,setNovBuffer]=useState('3');
   const [novAsking,setNovAsking]=useState('');
+  const [elpOverride,setElpOverride]=useState('');
 
   useEffect(()=>{const c=()=>setIsMobile(window.innerWidth<768);c();window.addEventListener('resize',c);return()=>window.removeEventListener('resize',c);},[]);
   useEffect(()=>{fetch('/api/calculator/history').then(r=>r.json()).then(d=>{if(Array.isArray(d))setHistory(d);}).catch(()=>{});},[]);
@@ -141,16 +142,19 @@ export default function OfferGenerator(){
   // Novation
   const novValid=novComps.filter(c=>{const d=daysDiff(c.date);return toN(c.price)>0&&(d===null||d<=365);});
   const alp=novValid.length>0?Math.round(novValid.reduce((s,c)=>s+toN(c.price),0)/novValid.length):0;
-  const elp=Math.round(alp*0.90);
+  const calculatedELP=Math.round(alp*0.90);
+  const elpIsOverridden=toN(elpOverride)>0;
+  const activeELP=elpIsOverridden?toN(elpOverride):calculatedELP;
+  const elp=calculatedELP;
   const bufPct=toN(novBuffer)/100;
-  const adjElp=Math.round(elp*(1-bufPct));
-  const netProc=Math.round(adjElp*0.90);
+  const adjElp=Math.round(activeELP*(1-bufPct));
+  const netProc=Math.round(activeELP*0.90);
   const novFeeN=toN(novFee);
   const novCushN=toN(novCushion);
   const offerToSeller=netProc-novFeeN-novCushN;
-  const spread=elp-offerToSeller;
+  const spread=activeELP-offerToSeller;
   const novAskN=toN(novAsking);
-  const feePctElp=elp>0?(novFeeN/elp*100).toFixed(1):0;
+  const feePctElp=activeELP>0?(novFeeN/activeELP*100).toFixed(1):0;
   let novV='',novVC='';
   if(alp>0){if(spread>=20000){novV='STRONG';novVC='var(--green)';}else if(spread>=12000){novV='VIABLE';novVC='var(--gold)';}else if(spread>=6000){novV='TIGHT';novVC='var(--orange)';}else{novV='DEAD';novVC='var(--red)';}}
 
@@ -167,7 +171,7 @@ export default function OfferGenerator(){
 
   function buildNovBrief(){
     const compLines=novComps.map((c,i)=>{if(!toN(c.price))return `  Comp ${i+1}: —`;const d=daysDiff(c.date);return `  Comp ${i+1}: ${fmt(toN(c.price))} | ${d!==null?d+' days ago':'no date'}`;}).join('\n');
-    return `OFFER GENERATOR — NOVORA CAPITAL\nDate: ${todayISO()} | Exit: Novation\nAS-IS COMPS (${novValid.length} valid of 4):\n${compLines}\nALP: ${fmt(alp)} | ELP: ${fmt(elp)} | Adj ELP: ${fmt(adjElp)} | Net Proceeds: ${fmt(netProc)}\nNovation Fee: ${fmt(novFeeN)} | Safety Cushion: ${fmt(novCushN)}\nOFFER TO SELLER: ${fmt(offerToSeller)} | YOUR SPREAD: ${fmt(spread)}${novAskN?`\nSELLER ASKING: ${fmt(novAskN)} | GAP: ${novAskN<=offerToSeller?`+${fmt(offerToSeller-novAskN)} room`:`-${fmt(novAskN-offerToSeller)} above offer`}`:''}\nVERDICT: ${novV}`.trim();
+    return `OFFER GENERATOR — NOVORA CAPITAL\nDate: ${todayISO()} | Exit: Novation${elpIsOverridden?' | ELP OVERRIDDEN':''}\nAS-IS COMPS (${novValid.length} valid of 4):\n${compLines}\nALP: ${fmt(alp)} | ELP: ${fmt(activeELP)}${elpIsOverridden?` (calc: ${fmt(calculatedELP)})`:''}| Adj ELP: ${fmt(adjElp)} | Net Proceeds: ${fmt(netProc)}\nNovation Fee: ${fmt(novFeeN)} | Safety Cushion: ${fmt(novCushN)}\nOFFER TO SELLER: ${fmt(offerToSeller)} | YOUR SPREAD: ${fmt(spread)}${novAskN?`\nSELLER ASKING: ${fmt(novAskN)} | GAP: ${novAskN<=offerToSeller?`+${fmt(offerToSeller-novAskN)} room`:`-${fmt(novAskN-offerToSeller)} above offer`}`:''}\nVERDICT: ${novV}`.trim();
   }
 
   async function copyBrief(){
@@ -428,12 +432,36 @@ export default function OfferGenerator(){
             {alp>0&&(
               <div style={CARD_C}>
                 <div style={SEC}>Formula Chain</div>
-                {[{l:'ALP (Average Listing Price)',f:'Average of valid as-is comps',v:alp},{l:'ELP (Estimated Listing Price)',f:'ALP × 90% — listed below market for fast sale',v:elp},{l:'Net Proceeds',f:'Adj ELP × 90% — after agent commission and closing costs',v:netProc}].map((row,i)=>(
-                  <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:i<2?'1px solid var(--border)':'none',flexWrap:'wrap',gap:8}}>
-                    <div><div style={{fontSize:14,fontWeight:700,color:'var(--text)'}}>{row.l}</div><div style={{fontSize:12,color:'var(--text3)'}}>{row.f}</div></div>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--cyan)'}}>{fmt(row.v)}</div>
+                {/* ALP */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:'1px solid var(--border)',flexWrap:'wrap',gap:8}}>
+                  <div><div style={{fontSize:14,fontWeight:700,color:'var(--text)'}}>ALP (Average Listing Price)</div><div style={{fontSize:12,color:'var(--text3)'}}>Average of valid as-is comps</div></div>
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--cyan)'}}>{fmt(alp)}</div>
+                </div>
+                {/* ELP */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:'1px solid var(--border)',flexWrap:'wrap',gap:8}}>
+                  <div>
+                    <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap',marginBottom:2}}>
+                      <span style={{fontSize:14,fontWeight:700,color:'var(--text)'}}>ELP (Estimated Listing Price)</span>
+                      {elpIsOverridden&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--orange-faint)',color:'var(--orange)',border:'1px solid var(--orange-border)',fontWeight:700}}>MANUAL OVERRIDE</span>}
+                    </div>
+                    <div style={{fontSize:12,color:'var(--text3)'}}>ALP × 90% — listed below market for fast sale{elpIsOverridden?` (calc: ${fmt(calculatedELP)})`:''}</div>
                   </div>
-                ))}
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--cyan)'}}>{fmt(activeELP)}</div>
+                </div>
+                {/* ELP override input */}
+                <div style={{padding:'12px 0',borderBottom:'1px solid var(--border)'}}>
+                  <label style={{...LBL,marginBottom:6,color:'var(--text3)'}}>Override ELP (optional)</label>
+                  <div style={{position:'relative',maxWidth:220}}>
+                    <span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
+                    <input style={{...INPUT,paddingLeft:24,fontFamily:'JetBrains Mono,monospace'}} type="text" inputMode="numeric" value={elpOverride} onChange={e=>setElpOverride(e.target.value.replace(/[^0-9]/g,''))} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/>
+                  </div>
+                  {elpIsOverridden&&<div style={{marginTop:6,fontSize:12,color:'var(--text3)'}}>Calculated was {fmt(calculatedELP)} — override active</div>}
+                </div>
+                {/* Net Proceeds */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',flexWrap:'wrap',gap:8}}>
+                  <div><div style={{fontSize:14,fontWeight:700,color:'var(--text)'}}>Net Proceeds</div><div style={{fontSize:12,color:'var(--text3)'}}>ELP × 90% — after agent commission and closing costs</div></div>
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--cyan)'}}>{fmt(netProc)}</div>
+                </div>
               </div>
             )}
 
@@ -470,7 +498,7 @@ export default function OfferGenerator(){
                 </div>
                 <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',marginBottom:16}}>
                   <div style={SEC}>Novation Breakdown</div>
-                  {[{l:'ALP',v:alp},{l:'ELP (×90%)',v:elp},{l:`Adj ELP (−${novBuffer}% buffer)`,v:adjElp},{l:'Net Proceeds (×90%)',v:netProc},{l:'Minus Novation Fee',v:-novFeeN},{l:'Minus Safety Cushion',v:-novCushN}].map((row,i)=>(
+                  {[{l:'ALP',v:alp},{l:elpIsOverridden?'ELP (OVERRIDE)':'ELP (×90%)',v:activeELP},{l:`Adj ELP (−${novBuffer}% buffer)`,v:adjElp},{l:'Net Proceeds (×90%)',v:netProc},{l:'Minus Novation Fee',v:-novFeeN},{l:'Minus Safety Cushion',v:-novCushN}].map((row,i)=>(
                     <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
                       <span style={{color:'var(--text2)',fontSize:15}}>{row.l}</span>
                       <span style={{fontFamily:'JetBrains Mono,monospace',color:row.v<0?'var(--red)':'var(--text)',fontSize:15,fontWeight:600}}>{row.v<0?`-${fmt(-row.v)}`:fmt(row.v)}</span>

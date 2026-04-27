@@ -1,289 +1,404 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Legend } from 'recharts';
+import DatePicker from '../components/DatePicker.js';
 
-function toN(v) { const n = parseFloat(String(v || 0).replace(/[^0-9.]/g, '')); return isNaN(n) ? 0 : n; }
-function pct(a, b) { return b > 0 ? ((a / b) * 100).toFixed(1) + '%' : '0%'; }
+const toN=v=>{const n=Number(String(v||'').replace(/[^0-9.-]/g,''));return isNaN(n)?0:n;};
+const pct=(a,b)=>b>0?Math.round(a/b*100):0;
+const fmt=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
+const todayISO=()=>new Date().toISOString().slice(0,10);
 
-const TODAY = new Date().toISOString().slice(0, 10);
-const FILTER_STACKS = ['Absentee+Tax Delinquent+Equity', 'Absentee+Equity', 'Tax Delinquent+Equity', 'Absentee Only', 'Pre-Foreclosure', 'Probate', 'High Equity', 'Custom'];
-const REJECTION_REASONS = ['Bad comps', 'No equity', 'Luxury price', 'Lot/land', 'Bad area', 'Wrong market', 'Already listed', 'Other'];
-const PALETTE = ['#F0A500', '#00B8D4', '#9B7EF8', '#F04455', '#16C47E', '#F472B6'];
-const REJ_PALETTE = ['#F0A500', '#00B8D4', '#9B7EF8', '#F04455', '#16C47E', '#F472B6', '#E8855A', '#A0B4C8'];
+const INPUT={minHeight:48,padding:'12px 16px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)',color:'var(--text)',fontSize:15,outline:'none',fontFamily:'Outfit,sans-serif',width:'100%',transition:'border-color 0.15s'};
+const LBL={fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.11em',color:'var(--text3)',marginBottom:8,display:'block'};
+const CARD={background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',marginBottom:14};
+const SEC={fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14};
 
-const navS = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', height: 56, background: 'var(--surface)', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, zIndex: 50 };
-const cardS = (accent) => ({ background: 'var(--surface)', border: '1px solid var(--border)', borderLeft: accent ? `4px solid ${accent}` : '1px solid var(--border)', borderRadius: 14, padding: 20, marginBottom: 16 });
-const inputS = { width: '100%', padding: '9px 12px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text)', fontSize: 14 };
-const btnS = (c, ghost) => ({ padding: '8px 16px', borderRadius: 8, border: ghost ? `1px solid ${c}44` : 'none', background: ghost ? c + '14' : c, color: ghost ? c : '#000', fontWeight: 700, fontSize: 13, cursor: 'pointer' });
-const lbl = { fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', fontWeight: 600, display: 'block', marginBottom: 5 };
+const REJ_REASONS=['Bad comps','No equity','Luxury price','Lot/land','Bad area','Wrong market','Already listed','Other'];
+const REJ_COLORS=['var(--gold)','var(--cyan)','var(--purple)','var(--red)','var(--orange)','var(--green)','var(--text2)','var(--border2)'];
 
-function Badge({ label, color }) {
-  return <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: color + '18', color, border: `1px solid ${color}44`, fontWeight: 700 }}>{label}</span>;
+function RateIndicator({rate,low,high,label}){
+  const n=toN(rate);
+  const color=n>=high?'var(--gold)':n>=low?'var(--green)':'var(--red)';
+  const status=n>=high?'ABOVE':n>=low?'IN RANGE':'BELOW';
+  return <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
+    <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:14,fontWeight:700,color}}>{n}%</span>
+    <span style={{fontSize:11,padding:'1px 6px',borderRadius:4,background:color+'18',color,border:`1px solid ${color}40`,fontWeight:700}}>{status}</span>
+    <span style={{fontSize:11,color:'var(--text3)'}}>target {low}–{high}%</span>
+  </div>;
 }
 
-function StatCard({ label, value, color, sub }) {
-  return (
-    <div style={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', flex: 1 }}>
-      <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{label}</div>
-      <div className="num" style={{ fontSize: 24, fontWeight: 800, color: color || 'var(--text)' }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>{sub}</div>}
-    </div>
-  );
-}
+const CHART_TOOLTIP={contentStyle:{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',fontFamily:'JetBrains Mono,monospace',fontSize:13},labelStyle:{color:'var(--text2)',marginBottom:6}};
 
-function DiagRow({ label, value, target, unit, reverse }) {
-  const v = toN(value), t = toN(target);
-  const ok = reverse ? v <= t : v >= t;
-  const p2 = t > 0 ? Math.min(100, (v / t) * 100) : 0;
+export default function KPITracker(){
+  const router=useRouter();
+  const [isMobile,setIsMobile]=useState(false);
+  const [mainTab,setMainTab]=useState('WCL');
+  const [period,setPeriod]=useState('Daily');
+  const [wclEntries,setWclEntries]=useState([]);
+  const [campaigns,setCampaigns]=useState([]);
+  const [smsEntries,setSmsEntries]=useState([]);
+  const [showLogForm,setShowLogForm]=useState(false);
+
+  // WCL form
+  const [wclDate,setWclDate]=useState(todayISO());
+  const [received,setReceived]=useState('');
+  const [accepted,setAccepted]=useState('');
+  const [rejReasons,setRejReasons]=useState([]);
+  const [convos,setConvos]=useState('');
+  const [qualified,setQualified]=useState('');
+  const [offersMade,setOffersMade]=useState('');
+  const [offerResponses,setOfferResponses]=useState('');
+  const [contracts,setContracts]=useState('');
+  const [editId,setEditId]=useState(null);
+  const [saving,setSaving]=useState(false);
+
+  // Campaign form
+  const [showCampForm,setShowCampForm]=useState(false);
+  const [campName,setCampName]=useState('');
+  const [campCounty,setCampCounty]=useState('');
+  const [campFilter,setCampFilter]=useState('Absentee+Tax Delinquent+Equity');
+  const [campList,setCampList]=useState('');
+  const [campDaily,setCampDaily]=useState('450');
+  const [campDuration,setCampDuration]=useState('');
+  const [campCost,setCampCost]=useState('150');
+  const [campStart,setCampStart]=useState(todayISO());
+  const [campColor,setCampColor]=useState('var(--gold)');
+  const [showLogDay,setShowLogDay]=useState(null);
+
+  // SMS Log Day
+  const [ldDate,setLdDate]=useState(todayISO());
+  const [ldSent,setLdSent]=useState('');
+  const [ldLandlines,setLdLandlines]=useState('');
+  const [ldOptOuts,setLdOptOuts]=useState('');
+  const [ldReplies,setLdReplies]=useState('');
+  const [ldConvos,setLdConvos]=useState('');
+  const [ldQualified,setLdQualified]=useState('');
+  const [ldOffers,setLdOffers]=useState('');
+  const [ldResponses,setLdResponses]=useState('');
+  const [ldContracts,setLdContracts]=useState('');
+
+  useEffect(()=>{const c=()=>setIsMobile(window.innerWidth<768);c();window.addEventListener('resize',c);return()=>window.removeEventListener('resize',c);},[]);
+  useEffect(()=>{
+    fetch('/api/kpi/wcl').then(r=>r.json()).then(d=>{if(Array.isArray(d))setWclEntries(d.filter(e=>!e.deleted));}).catch(()=>{});
+    fetch('/api/kpi/campaigns').then(r=>r.json()).then(d=>{if(Array.isArray(d))setCampaigns(d.filter(c=>!c.deleted));}).catch(()=>{});
+    fetch('/api/kpi/sms').then(r=>r.json()).then(d=>{if(Array.isArray(d))setSmsEntries(d.filter(e=>!e.deleted));}).catch(()=>{});
+  },[]);
+
+  // WCL aggregate stats
+  const totalRec=wclEntries.reduce((s,e)=>s+toN(e.received),0);
+  const totalAcc=wclEntries.reduce((s,e)=>s+toN(e.accepted),0);
+  const totalConvos=wclEntries.reduce((s,e)=>s+toN(e.conversations),0);
+  const totalQual=wclEntries.reduce((s,e)=>s+toN(e.qualified),0);
+  const totalOffers=wclEntries.reduce((s,e)=>s+toN(e.offersMade),0);
+  const totalResp=wclEntries.reduce((s,e)=>s+toN(e.offerResponses),0);
+  const totalContracts=wclEntries.reduce((s,e)=>s+toN(e.contracts),0);
+
+  const accRate=pct(totalAcc,totalRec);
+  const contRate=pct(totalConvos,totalAcc);
+  const qualRate=pct(totalQual,totalConvos);
+  const offerRate=pct(totalOffers,totalQual);
+  const respRate=pct(totalResp,totalOffers);
+  const contractRate=pct(totalContracts,totalResp);
+
+  // Form live rates
+  const fRec=toN(received),fAcc=toN(accepted),fConvos=toN(convos),fQual=toN(qualified),fOffers=toN(offersMade),fResp=toN(offerResponses),fContracts=toN(contracts);
+  const fAccRate=pct(fAcc,fRec),fContRate=pct(fConvos,fAcc),fQualRate=pct(fQual,fConvos),fOfferRate=pct(fOffers,fQual),fRespRate=pct(fResp,fOffers),fContractRate=pct(fContracts,fResp);
+
+  // WCL chart data
+  const chartData=wclEntries.slice().reverse().map(e=>({date:e.date?.slice(5),received:toN(e.received),accepted:toN(e.accepted),offers:toN(e.offersMade),contracts:toN(e.contracts)}));
+
+  // Rejection analysis
+  const rejMap={};
+  wclEntries.forEach(e=>{(e.rejectionReasons||[]).forEach(r=>{rejMap[r]=(rejMap[r]||0)+1;});});
+  const rejData=Object.entries(rejMap).sort((a,b)=>b[1]-a[1]).map(([reason,count])=>({reason,count,pct:totalAcc>0?Math.round(count/totalAcc*100):0}));
+
+  // WCL Diagnostics
+  function wclDiagnostic(){
+    if(totalRec===0)return null;
+    if(accRate<55)return{color:'var(--gold)',bg:'var(--gold-faint)',border:'var(--gold-border)',title:'WCL QUALITY ISSUE',msg:`Acceptance rate is ${accRate}%. Check targeting filters. Are you receiving lots or luxury properties?`};
+    if(contRate<40)return{color:'var(--orange)',bg:'var(--orange-faint)',border:'var(--orange-border)',title:'CONTACT SPEED ISSUE',msg:`Reaching ${contRate}% of accepted leads. Are you contacting within 5 minutes of lead coming in?`};
+    if(qualRate<25)return{color:'var(--orange)',bg:'var(--orange-faint)',border:'var(--orange-border)',title:'CONVERSATION DEPTH ISSUE',msg:`${qualRate}% qualification rate. Conversations are not going deep enough into MCTP.`};
+    if(offerRate<90)return{color:'var(--red)',bg:'var(--red-faint)',border:'var(--red-border)',title:'OFFER DISCIPLINE ISSUE',msg:`${offerRate}% offer rate. Every qualified lead gets an offer. No exceptions. What stopped the offer?`};
+    if(respRate<20)return{color:'var(--red)',bg:'var(--red-faint)',border:'var(--red-border)',title:'OFFER DELIVERY ISSUE',msg:`${respRate}% response rate. Are you presenting terms before price? Delivering same day?`};
+    if(contractRate<15)return{color:'var(--gold)',bg:'var(--gold-faint)',border:'var(--gold-border)',title:'NEGOTIATION ISSUE',msg:'Sellers engaging but not signing. Review objection handling.'};
+    return{color:'var(--green)',bg:'var(--green-faint)',border:'var(--green-border)',title:'✓ WCL PIPELINE HEALTHY',msg:'Maintain volume and monitor daily.'};
+  }
+  const diag=wclDiagnostic();
+
+  async function saveWCL(){
+    setSaving(true);
+    const body={date:wclDate,received,accepted,rejectionReasons:rejReasons,conversations:convos,qualified,offersMade,offerResponses,contracts};
+    if(editId){
+      await fetch(`/api/kpi/wcl/${editId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    } else {
+      await fetch('/api/kpi/wcl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    }
+    fetch('/api/kpi/wcl').then(r=>r.json()).then(d=>{if(Array.isArray(d))setWclEntries(d.filter(e=>!e.deleted));});
+    setShowLogForm(false);setEditId(null);setReceived('');setAccepted('');setRejReasons([]);setConvos('');setQualified('');setOffersMade('');setOfferResponses('');setContracts('');setWclDate(todayISO());
+    setSaving(false);
+  }
+
+  function editEntry(e){
+    setEditId(e.id);setWclDate(e.date||todayISO());setReceived(String(e.received||''));setAccepted(String(e.accepted||''));setRejReasons(e.rejectionReasons||[]);setConvos(String(e.conversations||''));setQualified(String(e.qualified||''));setOffersMade(String(e.offersMade||''));setOfferResponses(String(e.offerResponses||''));setContracts(String(e.contracts||''));
+    setShowLogForm(true);
+  }
+
+  async function deleteWCL(id){
+    if(!confirm('Delete this entry?'))return;
+    await fetch(`/api/kpi/wcl/${id}`,{method:'DELETE'});
+    setWclEntries(e=>e.filter(x=>x.id!==id));
+  }
+
+  async function createCampaign(){
+    const body={name:campName,county:campCounty,filterStack:campFilter,listSize:campList,dailySend:campDaily,duration:campDuration,cost:campCost,startDate:campStart,color:campColor,status:'active'};
+    const res=await fetch('/api/kpi/campaigns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(res.ok){const d=await res.json();setCampaigns(c=>[...c,d]);setShowCampForm(false);setCampName('');setCampCounty('');setCampList('');setCampDuration('');setCampCost('150');}
+  }
+
+  async function saveLogDay(campId){
+    const body={campaignId:campId,date:ldDate,sent:ldSent,landlines:ldLandlines,optOuts:ldOptOuts,replies:ldReplies,conversations:ldConvos,qualified:ldQualified,offersMade:ldOffers,offerResponses:ldResponses,contracts:ldContracts};
+    await fetch('/api/kpi/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    fetch('/api/kpi/sms').then(r=>r.json()).then(d=>{if(Array.isArray(d))setSmsEntries(d.filter(e=>!e.deleted));});
+    setShowLogDay(null);setLdSent('');setLdLandlines('');setLdOptOuts('');setLdReplies('');setLdConvos('');setLdQualified('');setLdOffers('');setLdResponses('');setLdContracts('');
+  }
+
+  function campStats(camp){
+    const entries=smsEntries.filter(e=>e.campaignId===camp.id);
+    const totalSent=entries.reduce((s,e)=>s+toN(e.sent),0);
+    const totalLand=entries.reduce((s,e)=>s+toN(e.landlines),0);
+    const totalOpt=entries.reduce((s,e)=>s+toN(e.optOuts),0);
+    const deliv=totalSent-totalLand-totalOpt;
+    const replies=entries.reduce((s,e)=>s+toN(e.replies),0);
+    const cConvos=entries.reduce((s,e)=>s+toN(e.conversations),0);
+    const cQual=entries.reduce((s,e)=>s+toN(e.qualified),0);
+    const cOffers=entries.reduce((s,e)=>s+toN(e.offersMade),0);
+    const cResp=entries.reduce((s,e)=>s+toN(e.offerResponses),0);
+    const cContracts=entries.reduce((s,e)=>s+toN(e.contracts),0);
+    const planned=toN(camp.dailySend)*toN(camp.duration);
+    const costN=toN(camp.cost);
+    const costPerReply=replies>0?(costN/replies).toFixed(2):null;
+    const costPerContract=cContracts>0?(costN/cContracts).toFixed(0):null;
+    return{totalSent,deliv,replies,cConvos,cQual,cOffers,cResp,cContracts,planned,costPerReply,costPerContract,
+      delivRate:pct(deliv,totalSent),replyRate:pct(replies,deliv),convoRate:pct(cConvos,replies),qualRate:pct(cQual,cConvos),offerRate:pct(cOffers,cQual),respRate:pct(cResp,cOffers),contractRate:pct(cContracts,cResp)};
+  }
+
+  // Combined stats
+  const totalWCLContracts=totalContracts;
+  const totalSMSContracts=smsEntries.reduce((s,e)=>s+toN(e.contracts),0);
+  const nowDate=new Date();
+  const endDate=new Date('2026-07-25');
+  const daysLeft=Math.max(0,Math.ceil((endDate-nowDate)/86400000));
+  const totalDays=Math.ceil((endDate-new Date('2026-01-01'))/86400000);
+  const daysElapsed=totalDays-daysLeft;
+  const combinedContracts=totalWCLContracts+totalSMSContracts;
+  const goalContracts=6;
+  const onPace=daysElapsed>0?(combinedContracts/daysElapsed*totalDays)>=goalContracts:false;
+  const paceStatus=combinedContracts>=goalContracts?'DONE':onPace?'ON TRACK':'BEHIND';
+  const paceColor=paceStatus==='DONE'?'var(--green)':paceStatus==='ON TRACK'?'var(--gold)':'var(--red)';
+
+  const p=isMobile?16:24;
+  const CAMP_COLORS=['var(--gold)','var(--cyan)','var(--purple)','var(--red)','var(--orange)','var(--green)'];
+
+  const funnelRates=[
+    {l:'Acceptance Rate',r:accRate,low:60,high:75,desc:'Accepted / Received'},
+    {l:'Contact Rate',r:contRate,low:40,high:55,desc:'Conversations / Accepted'},
+    {l:'Qualification Rate',r:qualRate,low:30,high:40,desc:'Qualified / Conversations'},
+    {l:'Offer Rate',r:offerRate,low:90,high:100,desc:'Offers / Qualified'},
+    {l:'Response Rate',r:respRate,low:25,high:35,desc:'Responses / Offers'},
+    {l:'Contract Rate',r:contractRate,low:15,high:25,desc:'Contracts / Responses'},
+  ];
+
   return (
-    <div style={{ marginBottom: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-        <span style={{ fontSize: 13, color: 'var(--text)' }}>{label}</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="num" style={{ fontSize: 13, color: 'var(--text)', fontWeight: 700 }}>{value}{unit}</span>
-          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, background: ok ? 'var(--green-faint)' : 'var(--red-faint)', color: ok ? 'var(--green)' : 'var(--red)', border: `1px solid ${ok ? 'var(--green-border)' : 'var(--red-border)'}`, fontWeight: 700 }}>{ok ? 'ON' : 'LOW'}</span>
+    <div style={{minHeight:'100vh',background:'var(--bg)',paddingBottom:isMobile?80:40}}>
+      <nav style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:`0 ${p}px`,height:58,background:'var(--surface)',borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:100}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <button onClick={()=>router.push('/')} style={{background:'none',border:'none',color:'var(--text3)',fontSize:20,cursor:'pointer',padding:'4px 8px',borderRadius:6}}>←</button>
+          <span style={{fontWeight:700,fontSize:16,color:'var(--text)'}}>KPI Tracker</span>
         </div>
-      </div>
-      <div style={{ height: 4, borderRadius: 2, background: 'var(--surface3)' }}>
-        <div style={{ height: '100%', borderRadius: 2, width: p2 + '%', background: ok ? 'var(--green)' : 'var(--gold)', transition: 'width 0.3s' }} />
-      </div>
-      <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>Target: {target}{unit}</div>
-    </div>
-  );
-}
-
-export default function KpiPage() {
-  const router = useRouter();
-  const [sessionOk, setSessionOk] = useState(false);
-  const [userName, setUserName] = useState('');
-  const [tab, setTab] = useState('WCL');
-  const [period, setPeriod] = useState('Daily');
-  const [wclEntries, setWclEntries] = useState([]);
-  const [showWclForm, setShowWclForm] = useState(false);
-  const [editWcl, setEditWcl] = useState(null);
-  const [wclForm, setWclForm] = useState({ date: TODAY, received: '', accepted: '', conversations: '', qualified: '', offersMade: '', offerResponses: '', contracts: '', rejReasons: [] });
-  const [campaigns, setCampaigns] = useState([]);
-  const [showCampForm, setShowCampForm] = useState(false);
-  const [campForm, setCampForm] = useState({ name: '', county: '', zips: '', filterStack: FILTER_STACKS[0], listSize: '', dailySend: '450', duration: '', cost: '150', startDate: TODAY, color: PALETTE[0] });
-  const [logDay, setLogDay] = useState(null);
-  const [dayForm, setDayForm] = useState({ date: TODAY, sent: '', landlines: '', optOuts: '', replies: '', qualified: '', offers: '', responses: '', contracts: '' });
-  const [strategies, setStrategies] = useState([]);
-  const [showStratForm, setShowStratForm] = useState(false);
-  const [stratForm, setStratForm] = useState({ name: '', color: PALETTE[0], notes: '' });
-
-  useEffect(() => {
-    fetch('/api/auth/session').then(r => { if (!r.ok) { router.push('/'); return; } return r.json(); }).then(d => { if (d?.userName) { setSessionOk(true); setUserName(d.userName); } }).catch(() => router.push('/'));
-    fetch('/api/kpi/wcl').then(r => r.json()).then(d => { if (Array.isArray(d)) setWclEntries(d); }).catch(() => {});
-    fetch('/api/kpi/campaigns').then(r => r.json()).then(d => { if (Array.isArray(d)) setCampaigns(d); }).catch(() => {});
-    fetch('/api/kpi/strategies').then(r => r.json()).then(d => { if (Array.isArray(d)) setStrategies(d); }).catch(() => {});
-  }, []);
-
-  const saveWcl = async () => {
-    const url = editWcl ? `/api/kpi/wcl/${editWcl}` : '/api/kpi/wcl';
-    const method = editWcl ? 'PUT' : 'POST';
-    const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(wclForm) });
-    const d = await res.json();
-    if (editWcl) { setWclEntries(prev => prev.map(e => e.id === editWcl ? d : e)); } else { setWclEntries(prev => [...prev, d]); }
-    setShowWclForm(false); setEditWcl(null);
-    setWclForm({ date: TODAY, received: '', accepted: '', conversations: '', qualified: '', offersMade: '', offerResponses: '', contracts: '', rejReasons: [] });
-  };
-  const deleteWcl = async (id) => { if (!confirm('Delete this entry?')) return; await fetch(`/api/kpi/wcl/${id}`, { method: 'DELETE' }); setWclEntries(prev => prev.filter(e => e.id !== id)); };
-  const editWclEntry = (e) => { setWclForm({ date: e.date, received: e.received || '', accepted: e.accepted || '', conversations: e.conversations || '', qualified: e.qualified || '', offersMade: e.offersMade || '', offerResponses: e.offerResponses || '', contracts: e.contracts || '', rejReasons: e.rejReasons || [] }); setEditWcl(e.id); setShowWclForm(true); };
-
-  const saveCampaign = async () => {
-    const res = await fetch('/api/kpi/campaigns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(campForm) });
-    const d = await res.json(); setCampaigns(prev => [...prev, d]); setShowCampForm(false);
-    setCampForm({ name: '', county: '', zips: '', filterStack: FILTER_STACKS[0], listSize: '', dailySend: '450', duration: '', cost: '150', startDate: TODAY, color: PALETTE[0] });
-  };
-  const archiveCampaign = async (id) => { const res = await fetch(`/api/kpi/campaigns/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'archived' }) }); const d = await res.json(); setCampaigns(prev => prev.map(c => c.id === id ? d : c)); };
-  const deleteCampaign = async (id) => { if (!confirm('Delete archived campaign?')) return; await fetch(`/api/kpi/campaigns/${id}`, { method: 'DELETE' }); setCampaigns(prev => prev.filter(c => c.id !== id)); };
-  const saveDay = async () => {
-    const res = await fetch(`/api/kpi/campaigns/${logDay}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dailyEntry: { ...dayForm, loggedBy: userName, loggedAt: new Date().toISOString() } }) });
-    const d = await res.json(); setCampaigns(prev => prev.map(c => c.id === logDay ? d : c));
-    setLogDay(null); setDayForm({ date: TODAY, sent: '', landlines: '', optOuts: '', replies: '', qualified: '', offers: '', responses: '', contracts: '' });
-  };
-  const saveStrategy = async () => {
-    const res = await fetch('/api/kpi/strategies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(stratForm) });
-    const d = await res.json(); setStrategies(prev => [...prev, d]); setShowStratForm(false); setStratForm({ name: '', color: PALETTE[0], notes: '' });
-  };
-  const toggleStrategy = async (id, active) => { await fetch(`/api/kpi/strategies/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active }) }); setStrategies(prev => prev.map(s => s.id === id ? { ...s, active } : s)); };
-  const deleteStrategy = async (id) => { if (!confirm('Delete strategy?')) return; await fetch(`/api/kpi/strategies/${id}`, { method: 'DELETE' }); setStrategies(prev => prev.filter(s => s.id !== id)); };
-
-  const wf = wclForm;
-  const rej = toN(wf.received) - toN(wf.accepted);
-  const liveAccRate = wf.received ? pct(toN(wf.accepted), toN(wf.received)) : '—';
-  const liveConvRate = wf.accepted ? pct(toN(wf.conversations), toN(wf.accepted)) : '—';
-  const liveOfferRate = wf.qualified ? pct(toN(wf.offersMade), toN(wf.qualified)) : '—';
-  const liveContractRate = wf.offersMade ? pct(toN(wf.contracts), toN(wf.offersMade)) : '—';
-
-  const activeCampaigns = campaigns.filter(c => c.status === 'active');
-  const archivedCampaigns = campaigns.filter(c => c.status === 'archived');
-
-  const wclChartData = wclEntries.slice(-30).map(e => ({ date: e.date?.slice(5), received: toN(e.received), accepted: toN(e.accepted), offers: toN(e.offersMade), contracts: toN(e.contracts) }));
-  const totalReceived = wclEntries.reduce((s, e) => s + toN(e.received), 0);
-  const totalAccepted = wclEntries.reduce((s, e) => s + toN(e.accepted), 0);
-  const totalContracts = wclEntries.reduce((s, e) => s + toN(e.contracts), 0);
-  const totalOffers = wclEntries.reduce((s, e) => s + toN(e.offersMade), 0);
-  const avgReceived = wclEntries.length ? totalReceived / wclEntries.length : 0;
-  const avgAccepted = wclEntries.length ? totalAccepted / wclEntries.length : 0;
-  const avgConvos = wclEntries.reduce((s, e) => s + toN(e.conversations), 0) / Math.max(1, wclEntries.length);
-  const avgQual = wclEntries.reduce((s, e) => s + toN(e.qualified), 0) / Math.max(1, wclEntries.length);
-  const avgOffers = wclEntries.reduce((s, e) => s + toN(e.offersMade), 0) / Math.max(1, wclEntries.length);
-  const offerRespRate = totalOffers > 0 ? (wclEntries.reduce((s, e) => s + toN(e.offerResponses), 0) / totalOffers * 100) : 0;
-  const allRejReasons = {};
-  wclEntries.forEach(e => (e.rejReasons || []).forEach(r => { allRejReasons[r] = (allRejReasons[r] || 0) + 1; }));
-  const totalRej = Object.values(allRejReasons).reduce((s, v) => s + v, 0);
-
-  const allCampSent = activeCampaigns.reduce((s, c) => (c.dailyEntries || []).reduce((a, d) => a + toN(d.sent), 0) + s, 0);
-  const allCampReplies = activeCampaigns.reduce((s, c) => (c.dailyEntries || []).reduce((a, d) => a + toN(d.replies), 0) + s, 0);
-  const allCampQual = activeCampaigns.reduce((s, c) => (c.dailyEntries || []).reduce((a, d) => a + toN(d.qualified), 0) + s, 0);
-  const allCampContracts = activeCampaigns.reduce((s, c) => (c.dailyEntries || []).reduce((a, d) => a + toN(d.contracts), 0) + s, 0);
-
-  const df = dayForm;
-  const deliverable = toN(df.sent) - toN(df.landlines);
-  const dReplyRate = deliverable > 0 ? pct(toN(df.replies), deliverable) : '—';
-  const dQualRate = toN(df.replies) > 0 ? pct(toN(df.qualified), toN(df.replies)) : '—';
-  const dOptOutRate = deliverable > 0 ? pct(toN(df.optOuts), deliverable) : '—';
-
-  if (!sessionOk) return <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)' }}>Loading…</div>;
-
-  return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg)', color: 'var(--text)' }}>
-      <nav style={navS}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <a href="/" style={{ color: 'var(--text3)', textDecoration: 'none', fontSize: 20 }}>←</a>
-          <span style={{ fontWeight: 700, fontSize: 16 }}>KPI Tracker</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {['Daily', 'Weekly', 'Monthly'].map(p => (
-              <button key={p} style={{ ...btnS(p === period ? 'var(--cyan)' : 'var(--surface2)', false), padding: '5px 12px', fontSize: 12, color: p === period ? '#000' : 'var(--text2)' }} onClick={() => setPeriod(p)}>{p}</button>
-            ))}
-          </div>
-          <span style={{ fontSize: 12, color: 'var(--text3)' }}>{userName}</span>
+        <div style={{display:'flex',gap:6}}>
+          {['Daily','Weekly','Monthly'].map(p=>(
+            <button key={p} onClick={()=>setPeriod(p)} style={{padding:'6px 14px',borderRadius:20,border:`1px solid ${period===p?'var(--gold-border)':'var(--border)'}`,background:period===p?'var(--gold-faint)':'transparent',color:period===p?'var(--gold)':'var(--text3)',fontSize:13,fontWeight:period===p?700:500,cursor:'pointer'}}>{p}</button>
+          ))}
         </div>
       </nav>
 
-      <div style={{ borderBottom: '1px solid var(--border)', display: 'flex', overflowX: 'auto' }}>
-        {['WCL', 'SMS Campaigns', 'Lead Gen', 'Diagnostics'].map(t => (
-          <button key={t} style={{ padding: '13px 22px', background: 'none', border: 'none', borderBottom: tab === t ? '2px solid var(--gold)' : '2px solid transparent', color: tab === t ? 'var(--gold)' : 'var(--text3)', fontWeight: tab === t ? 700 : 400, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 14 }} onClick={() => setTab(t)}>{t}</button>
+      {/* Main tabs */}
+      <div style={{background:'var(--surface)',borderBottom:'1px solid var(--border)',display:'flex',overflowX:'auto'}}>
+        {['WCL','SMS Campaigns','Combined'].map(t=>(
+          <button key={t} onClick={()=>setMainTab(t)} style={{padding:'14px 24px',background:'none',border:'none',borderBottom:mainTab===t?'2px solid var(--gold)':'2px solid transparent',color:mainTab===t?'var(--gold)':'var(--text3)',fontSize:14,fontWeight:mainTab===t?700:500,cursor:'pointer',whiteSpace:'nowrap',transition:'color 0.15s'}}>{t}</button>
         ))}
       </div>
 
-      <div style={{ maxWidth: 900, margin: '0 auto', padding: '24px 20px' }}>
+      <div style={{maxWidth:900,margin:'0 auto',padding:`${isMobile?16:24}px ${p}px`}}>
 
-        {/* ── WCL TAB ── */}
-        {tab === 'WCL' && (
+        {/* WCL TAB */}
+        {mainTab==='WCL'&&(
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ fontWeight: 700, fontSize: 15 }}>WCL / Propwire Leads</span>
-              <button style={btnS('var(--gold)', false)} onClick={() => { setShowWclForm(!showWclForm); setEditWcl(null); setWclForm({ date: TODAY, received: '', accepted: '', conversations: '', qualified: '', offersMade: '', offerResponses: '', contracts: '', rejReasons: [] }); }}>
-                {showWclForm ? '✕ Cancel' : '+ Log Today'}
+            <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+              <button onClick={()=>{setShowLogForm(f=>!f);setEditId(null);}} style={{padding:'10px 20px',borderRadius:10,border:'none',background:'var(--gold)',color:'#000',fontWeight:800,fontSize:14,cursor:'pointer',minHeight:46}}>
+                {showLogForm?'Close Form':'Log Today'}
               </button>
             </div>
 
-            {showWclForm && (
-              <div style={{ ...cardS('var(--gold)'), marginBottom: 20 }} className="slide-down">
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 12 }}>
-                  <div><label style={lbl}>Date</label><input type="date" style={inputS} value={wf.date} onChange={e => setWclForm(p => ({ ...p, date: e.target.value }))} /></div>
-                  <div><label style={lbl}>Leads Received</label><input type="number" style={inputS} value={wf.received} onChange={e => setWclForm(p => ({ ...p, received: e.target.value }))} /></div>
-                  <div>
-                    <label style={lbl}>Leads Accepted</label>
-                    <input type="number" style={inputS} value={wf.accepted} onChange={e => setWclForm(p => ({ ...p, accepted: e.target.value }))} />
-                    {rej > 0 && <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>Rejected: {rej}</div>}
-                  </div>
+            {showLogForm&&(
+              <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:'3px solid var(--gold)',borderRadius:14,padding:'20px 24px',marginBottom:16}}>
+                <div style={SEC}>Log WCL Entry — {editId?'Editing':'Today'}</div>
+                <div style={{marginBottom:14}}>
+                  <DatePicker label="Date" value={wclDate} onChange={setWclDate}/>
                 </div>
-                {rej > 0 && (
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={lbl}>Rejection Reasons</label>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {REJECTION_REASONS.map(r => {
-                        const sel = wf.rejReasons.includes(r);
-                        return <span key={r} onClick={() => setWclForm(p => ({ ...p, rejReasons: sel ? p.rejReasons.filter(x => x !== r) : [...p.rejReasons, r] }))} style={{ fontSize: 12, padding: '4px 10px', borderRadius: 20, border: `1px solid ${sel ? 'var(--gold-border)' : 'var(--border)'}`, background: sel ? 'var(--gold-faint)' : 'var(--surface2)', color: sel ? 'var(--gold)' : 'var(--text2)', cursor: 'pointer' }}>{r}</span>;
-                      })}
+                {[
+                  {l:'Leads Received',v:received,set:setReceived,rateEl:null},
+                  {l:'Leads Accepted',v:accepted,set:setAccepted,rateEl:fRec>0?<RateIndicator rate={fAccRate} low={60} high={75} label="Acceptance"/>:null},
+                  {l:'Conversations',v:convos,set:setConvos,rateEl:fAcc>0?<RateIndicator rate={fContRate} low={40} high={55} label="Contact"/>:null},
+                  {l:'Qualified',v:qualified,set:setQualified,rateEl:fConvos>0?<RateIndicator rate={fQualRate} low={30} high={40} label="Qualification"/>:null},
+                  {l:'Offers Made',v:offersMade,set:setOffersMade,rateEl:fQual>0?<RateIndicator rate={fOfferRate} low={90} high={100} label="Offer rate"/>:null},
+                  {l:'Offer Responses',v:offerResponses,set:setOfferResponses,rateEl:fOffers>0?<RateIndicator rate={fRespRate} low={25} high={35} label="Response"/>:null},
+                  {l:'Contracts',v:contracts,set:setContracts,rateEl:fResp>0?<RateIndicator rate={fContractRate} low={15} high={25} label="Contract"/>:null},
+                ].map(({l,v,set,rateEl})=>(
+                  <div key={l} style={{marginBottom:14}}>
+                    <label style={LBL}>{l}</label>
+                    <div style={{display:'flex',gap:12,alignItems:'flex-start',flexWrap:'wrap'}}>
+                      <input style={{...INPUT,maxWidth:200,fontFamily:'JetBrains Mono,monospace',fontSize:18}} type="number" value={v} onChange={e=>set(e.target.value)} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/>
+                      {rateEl&&<div style={{paddingTop:12}}>{rateEl}</div>}
                     </div>
+                    {l==='Leads Accepted'&&fAcc>0&&(
+                      <div style={{marginTop:10}}>
+                        <div style={{fontSize:12,color:'var(--text3)',marginBottom:8}}>Rejection reasons (select all that apply):</div>
+                        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                          {REJ_REASONS.map(r=>{const on=rejReasons.includes(r);return(
+                            <div key={r} onClick={()=>setRejReasons(x=>on?x.filter(i=>i!==r):[...x,r])} style={{padding:'6px 12px',borderRadius:6,border:`1px solid ${on?'var(--red-border)':'var(--border)'}`,background:on?'var(--red-faint)':'var(--surface3)',color:on?'var(--red)':'var(--text3)',cursor:'pointer',fontSize:13,fontWeight:on?700:400}}>{r}</div>
+                          );})}
+                        </div>
+                      </div>
+                    )}
+                    {l==='Leads Accepted'&&fAcc>0&&(
+                      <div style={{marginTop:10,padding:'12px 14px',borderRadius:8,background:'var(--surface3)',border:'1px solid var(--border)'}}>
+                        <div style={{fontSize:12,fontWeight:700,color:'var(--text2)',marginBottom:6}}>Based on {fAcc} accepted leads today:</div>
+                        <div style={{fontSize:13,color:'var(--text3)'}}>Contact target: <span style={{color:'var(--cyan)',fontWeight:700}}>{Math.ceil(fAcc*0.40)}</span> conversations minimum</div>
+                        <div style={{fontSize:13,color:'var(--text3)'}}>Offer target: <span style={{color:'var(--gold)',fontWeight:700}}>ALL</span> qualified leads must receive an offer</div>
+                      </div>
+                    )}
+                    {l==='Offers Made'&&fQual>0&&fOfferRate<90&&(
+                      <div style={{marginTop:6,fontSize:13,color:'var(--orange)'}}>Every qualified lead must receive an offer — what stopped the offer?</div>
+                    )}
                   </div>
-                )}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 12 }}>
-                  {[['Conversations', 'conversations'], ['Qualified', 'qualified'], ['Offers Made', 'offersMade'], ['Offer Responses', 'offerResponses'], ['Contracts', 'contracts']].map(([l, k]) => (
-                    <div key={k}><label style={lbl}>{l}</label><input type="number" style={inputS} value={wf[k] || ''} onChange={e => setWclForm(p => ({ ...p, [k]: e.target.value }))} /></div>
+                ))}
+
+                <div style={{padding:'14px 16px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)',marginBottom:16}}>
+                  <div style={{fontSize:12,fontWeight:700,color:'var(--text3)',marginBottom:10}}>Three Non-Negotiables</div>
+                  {[
+                    {label:'Contact Rate ≥40% of accepted',met:fContRate>=40},
+                    {label:'Offer Rate ≥90% of qualified',met:fOfferRate>=90||fQual===0},
+                    {label:'Entry logged for today',met:false},
+                  ].map((n,i)=>(
+                    <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 0',borderBottom:i<2?'1px solid var(--border)':'none'}}>
+                      <span style={{color:n.met?'var(--green)':'var(--red)',fontSize:16}}>{n.met?'✓':'☐'}</span>
+                      <span style={{fontSize:13,color:'var(--text2)'}}>{n.label}</span>
+                    </div>
                   ))}
                 </div>
-                <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--text2)', marginBottom: 14, flexWrap: 'wrap' }}>
-                  <span>Accept Rate: <b style={{ color: 'var(--text)' }}>{liveAccRate}</b></span>
-                  <span>Conv Rate: <b style={{ color: 'var(--text)' }}>{liveConvRate}</b></span>
-                  <span>Offer Rate: <b style={{ color: 'var(--text)' }}>{liveOfferRate}</b></span>
-                  <span>Contract%: <b style={{ color: 'var(--text)' }}>{liveContractRate}</b></span>
-                </div>
-                <button style={btnS('var(--gold)', false)} onClick={saveWcl}>Save Entry</button>
+
+                <button onClick={saveWCL} disabled={saving} style={{width:'100%',minHeight:52,borderRadius:10,border:'none',background:'var(--gold)',color:'#000',fontWeight:800,fontSize:15,cursor:'pointer'}}>
+                  {saving?'Saving...':'Save Entry'}
+                </button>
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-              <StatCard label="Total Received" value={totalReceived} color="var(--gold)" />
-              <StatCard label="Total Accepted" value={totalAccepted} color="var(--green)" />
-              <StatCard label="Accept Rate" value={pct(totalAccepted, totalReceived)} color="var(--cyan)" />
-              <StatCard label="Contracts" value={totalContracts} color="var(--purple)" />
+            {/* Stats */}
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:12,marginBottom:14}}>
+              {[
+                {l:'Total Received',v:totalRec,c:'var(--text)'},
+                {l:'Total Accepted',v:totalAcc,c:'var(--green)'},
+                {l:'Acceptance Rate',v:accRate+'%',c:accRate>=60?'var(--green)':accRate>=40?'var(--gold)':'var(--red)'},
+                {l:'Total Contracts',v:totalContracts,c:'var(--green)'},
+              ].map(s=>(
+                <div key={s.l} style={{...CARD,textAlign:'center',padding:'16px'}}>
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:28,fontWeight:800,color:s.c,marginBottom:4}}>{s.v}</div>
+                  <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)'}}>{s.l}</div>
+                </div>
+              ))}
             </div>
 
-            {wclChartData.length > 0 && (
-              <div style={cardS()}>
-                <div style={{ fontWeight: 700, marginBottom: 16, fontSize: 14 }}>WCL Activity</div>
-                <ResponsiveContainer width="100%" height={220}>
-                  <ComposedChart data={wclChartData} barGap={2}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="date" stroke="var(--text3)" tick={{ fontSize: 11 }} />
-                    <YAxis stroke="var(--text3)" tick={{ fontSize: 11 }} />
-                    <Tooltip contentStyle={{ background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="received" name="Received" fill="rgba(240,165,0,0.40)" stroke="#F0A500" strokeWidth={1} radius={[2, 2, 0, 0]} />
-                    <Bar dataKey="accepted" name="Accepted" fill="rgba(22,196,126,0.40)" stroke="#16C47E" strokeWidth={1} radius={[2, 2, 0, 0]} />
-                    <Line type="monotone" dataKey="offers" name="Offers" stroke="#00B8D4" dot={false} strokeWidth={2} />
-                    <Line type="monotone" dataKey="contracts" name="Contracts" stroke="#9B7EF8" dot={false} strokeWidth={2} />
+            {/* Funnel Rates */}
+            <div style={CARD}>
+              <div style={SEC}>WCL Funnel Rates</div>
+              {funnelRates.map(({l,r,low,high,desc})=>{
+                const color=r>=high?'var(--gold)':r>=low?'var(--green)':'var(--red)';
+                const status=r>=high?'ABOVE':r>=low?'IN RANGE':'BELOW';
+                return(
+                  <div key={l} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'12px 0',borderBottom:'1px solid var(--border)',flexWrap:'wrap',gap:8}}>
+                    <div><div style={{fontSize:14,color:'var(--text2)',fontWeight:600}}>{l}</div><div style={{fontSize:12,color:'var(--text3)'}}>{desc}</div></div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:20,fontWeight:800,color}}>{r}%</span>
+                      <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:color+'18',color,border:`1px solid ${color}40`,fontWeight:700}}>{status}</span>
+                      <span style={{fontSize:11,color:'var(--text3)'}}>target {low}–{high}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Chart */}
+            {chartData.length>0&&(
+              <div style={CARD}>
+                <div style={SEC}>WCL Activity</div>
+                <ResponsiveContainer width="100%" height={isMobile?180:240}>
+                  <ComposedChart data={chartData} margin={{top:0,right:10,bottom:0,left:-20}}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
+                    <XAxis dataKey="date" tick={{fontSize:12,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                    <YAxis tick={{fontSize:12,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
+                    <Tooltip {...CHART_TOOLTIP}/>
+                    <Bar dataKey="received" name="Received" fill="rgba(232,160,32,0.40)" radius={[4,4,0,0]}/>
+                    <Bar dataKey="accepted" name="Accepted" fill="rgba(34,197,94,0.40)" radius={[4,4,0,0]}/>
+                    <Line type="monotone" dataKey="offers" name="Offers" stroke="var(--cyan)" strokeWidth={2} dot={false}/>
+                    <Line type="monotone" dataKey="contracts" name="Contracts" stroke="var(--green)" strokeWidth={2} dot={false}/>
+                    <Legend wrapperStyle={{fontSize:13,color:'var(--text2)'}}/>
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
             )}
 
-            {totalRej > 0 && (
-              <div style={cardS()}>
-                <div style={{ fontWeight: 700, marginBottom: 14, fontSize: 14 }}>Rejection Analysis</div>
-                {Object.entries(allRejReasons).sort(([, a], [, b]) => b - a).map(([r, c], idx) => {
-                  const color = REJ_PALETTE[idx % REJ_PALETTE.length];
-                  return (
-                    <div key={r} style={{ marginBottom: 10 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                        <span style={{ fontSize: 13, color: 'var(--text)' }}>{r}</span>
-                        <span className="num" style={{ fontSize: 12, color: 'var(--text3)' }}>{c} ({pct(c, totalRej)})</span>
-                      </div>
-                      <div style={{ height: 6, background: 'var(--surface3)', borderRadius: 3 }}>
-                        <div style={{ height: '100%', width: pct(c, totalRej), background: color, borderRadius: 3, opacity: 0.85 }} />
-                      </div>
+            {/* Rejection Analysis */}
+            {rejData.length>0&&(
+              <div style={CARD}>
+                <div style={SEC}>Rejection Analysis</div>
+                {rejData.map(({reason,count,pct},i)=>(
+                  <div key={reason} style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
+                    <span style={{width:120,fontSize:13,color:'var(--text2)',flexShrink:0}}>{reason}</span>
+                    <div style={{flex:1,height:8,borderRadius:4,background:'var(--surface3)',overflow:'hidden'}}>
+                      <div style={{height:'100%',borderRadius:4,width:`${pct}%`,background:REJ_COLORS[i%REJ_COLORS.length]}}/>
                     </div>
-                  );
-                })}
+                    <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:13,color:'var(--text2)',minWidth:60,textAlign:'right'}}>{count} ({pct}%)</span>
+                  </div>
+                ))}
               </div>
             )}
 
-            {period === 'Daily' && wclEntries.length > 0 && (
-              <div style={cardS()}>
-                <div style={{ fontWeight: 700, marginBottom: 14, fontSize: 14 }}>Entry Log</div>
-                {[...wclEntries].reverse().map(e => (
-                  <div key={e.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <span className="num" style={{ fontSize: 12, color: 'var(--text3)', whiteSpace: 'nowrap', minWidth: 72 }}>{e.date}</span>
-                    {e.loggedBy && <Badge label={e.loggedBy} color="var(--cyan)" />}
-                    <div style={{ display: 'flex', gap: 16, flex: 1, flexWrap: 'wrap' }}>
-                      {[['Rcvd', toN(e.received), 'var(--gold)'], ['Acc', toN(e.accepted), 'var(--green)'], ['Conv', toN(e.conversations), 'var(--cyan)'], ['Offers', toN(e.offersMade), 'var(--purple)'], ['Cntrct', toN(e.contracts), 'var(--green)']].map(([l, v, c]) => (
-                        v > 0 && <div key={l} style={{ textAlign: 'center' }}>
-                          <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{l}</div>
-                          <div className="num" style={{ fontSize: 15, fontWeight: 800, color: c }}>{v}</div>
-                        </div>
+            {/* Diagnostics */}
+            {diag&&(
+              <div style={{padding:'14px 18px',borderRadius:12,background:diag.bg,border:`1px solid ${diag.border}`,marginBottom:14}}>
+                <div style={{fontWeight:800,color:diag.color,fontSize:14,marginBottom:4}}>{diag.title}</div>
+                <div style={{color:diag.color,fontSize:13,opacity:0.85}}>{diag.msg}</div>
+              </div>
+            )}
+
+            {/* Entry Log */}
+            {period==='Daily'&&wclEntries.length>0&&(
+              <div style={CARD}>
+                <div style={SEC}>Entry Log</div>
+                {wclEntries.slice().reverse().map(e=>(
+                  <div key={e.id} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 0',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
+                    <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)',minWidth:72}}>{e.date}</span>
+                    <span style={{fontSize:11,padding:'1px 8px',borderRadius:4,background:'var(--gold-faint)',color:'var(--gold)',border:'1px solid var(--gold-border)',fontWeight:700}}>{e.loggedBy}</span>
+                    <div style={{display:'flex',gap:10,flex:1,flexWrap:'wrap'}}>
+                      {[{l:'rcvd',v:e.received},{l:'acc',v:e.accepted},{l:'cnv',v:e.conversations},{l:'off',v:e.offersMade},{l:'con',v:e.contracts}].map(({l,v})=>toN(v)>0&&(
+                        <span key={l} style={{fontSize:12,color:'var(--text2)'}}><span style={{color:'var(--text3)'}}>{l}:</span> <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700}}>{v}</span></span>
                       ))}
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button style={{ ...btnS('var(--surface2)', false), padding: '4px 10px', fontSize: 12, color: 'var(--text2)', border: '1px solid var(--border)' }} onClick={() => editWclEntry(e)}>Edit</button>
-                      <button style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 14 }} onClick={() => deleteWcl(e.id)}>✕</button>
+                    <div style={{display:'flex',gap:6}}>
+                      <button onClick={()=>editEntry(e)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
+                      <button onClick={()=>deleteWCL(e.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
                     </div>
                   </div>
                 ))}
@@ -292,230 +407,199 @@ export default function KpiPage() {
           </>
         )}
 
-        {/* ── SMS CAMPAIGNS TAB ── */}
-        {tab === 'SMS Campaigns' && (
+        {/* SMS CAMPAIGNS TAB */}
+        {mainTab==='SMS Campaigns'&&(
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ fontWeight: 700, fontSize: 15 }}>SMS Campaigns</span>
-              <button style={btnS('var(--purple)', false)} onClick={() => setShowCampForm(!showCampForm)}>{showCampForm ? '✕ Cancel' : '+ New Campaign'}</button>
+            <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
+              <button onClick={()=>setShowCampForm(f=>!f)} style={{padding:'10px 20px',borderRadius:10,border:'none',background:'var(--purple)',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',minHeight:46}}>
+                {showCampForm?'Close':'New Campaign'}
+              </button>
             </div>
 
-            {showCampForm && (
-              <div style={{ ...cardS('var(--purple)'), marginBottom: 20 }} className="slide-down">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-                  {[['Campaign Name', 'name', 'text'], ['County', 'county', 'text'], ['Zip Codes (comma sep)', 'zips', 'text']].map(([l, k, t]) => (
-                    <div key={k}><label style={lbl}>{l}</label><input type={t} style={inputS} value={campForm[k]} onChange={e => setCampForm(p => ({ ...p, [k]: e.target.value }))} /></div>
-                  ))}
-                  <div>
-                    <label style={lbl}>Filter Stack</label>
-                    <select style={inputS} value={campForm.filterStack} onChange={e => setCampForm(p => ({ ...p, filterStack: e.target.value }))}>
-                      {FILTER_STACKS.map(f => <option key={f}>{f}</option>)}
+            {showCampForm&&(
+              <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:'3px solid var(--purple)',borderRadius:14,padding:'20px 24px',marginBottom:16}}>
+                <div style={SEC}>Create SMS Campaign</div>
+                <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12,marginBottom:14}}>
+                  <div><label style={LBL}>Campaign Name</label><input style={INPUT} value={campName} onChange={e=>setCampName(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <div><label style={LBL}>Target County</label><input style={INPUT} value={campCounty} onChange={e=>setCampCounty(e.target.value)} placeholder="e.g. Cuyahoga" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <div><label style={LBL}>Filter Stack</label>
+                    <select style={{...INPUT,height:48}} value={campFilter} onChange={e=>setCampFilter(e.target.value)}>
+                      {['Absentee+Tax Delinquent+Equity','Absentee+Equity','Tax Delinquent+Equity','Absentee Only','Pre-Foreclosure','Probate','High Equity','Custom'].map(f=><option key={f} value={f}>{f}</option>)}
                     </select>
                   </div>
-                  {[['List Size', 'listSize', 'number'], ['Daily Send', 'dailySend', 'number'], ['Duration (days)', 'duration', 'number'], ['List Cost $', 'cost', 'number'], ['Start Date', 'startDate', 'date']].map(([l, k, t]) => (
-                    <div key={k}><label style={lbl}>{l}</label><input type={t} style={inputS} value={campForm[k]} onChange={e => setCampForm(p => ({ ...p, [k]: e.target.value }))} /></div>
-                  ))}
+                  <div><label style={LBL}>List Size</label><input style={{...INPUT,fontFamily:'JetBrains Mono,monospace',fontSize:18}} type="number" value={campList} onChange={e=>setCampList(e.target.value)} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <div><label style={LBL}>Daily Send Volume</label><input style={INPUT} type="number" value={campDaily} onChange={e=>setCampDaily(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <div><label style={LBL}>Duration (days)</label><input style={INPUT} type="number" value={campDuration} onChange={e=>setCampDuration(e.target.value)} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <div><label style={LBL}>List Cost ($)</label>
+                    <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
+                    <input style={{...INPUT,paddingLeft:24}} type="number" value={campCost} onChange={e=>setCampCost(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  </div>
+                  <div><DatePicker label="Start Date" value={campStart} onChange={setCampStart}/></div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                  {PALETTE.map(c => <div key={c} onClick={() => setCampForm(p => ({ ...p, color: c }))} style={{ width: 28, height: 28, borderRadius: '50%', background: c, cursor: 'pointer', outline: campForm.color === c ? `3px solid ${c}55` : 'none', outlineOffset: 2 }} />)}
+                <div style={{marginBottom:14}}>
+                  <label style={LBL}>Color</label>
+                  <div style={{display:'flex',gap:8}}>{CAMP_COLORS.map(c=><div key={c} onClick={()=>setCampColor(c)} style={{width:28,height:28,borderRadius:'50%',background:c,cursor:'pointer',outline:campColor===c?`3px solid ${c}`:'3px solid transparent',outlineOffset:2}}/>)}</div>
                 </div>
-                {campForm.dailySend && campForm.duration && (
-                  <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12, display: 'flex', gap: 16 }}>
-                    <span>Total sends: <b style={{ color: 'var(--text)' }}>{(toN(campForm.dailySend) * toN(campForm.duration)).toLocaleString()}</b></span>
-                    <span>Est replies (3%): <b style={{ color: 'var(--text)' }}>{Math.round(toN(campForm.dailySend) * toN(campForm.duration) * 0.03)}</b></span>
-                    <span>Cost/day: <b style={{ color: 'var(--text)' }}>${(toN(campForm.cost) / Math.max(1, toN(campForm.duration))).toFixed(2)}</b></span>
+                {(toN(campDaily)*toN(campDuration))>0&&(
+                  <div style={{padding:'12px 14px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)',marginBottom:14}}>
+                    <div style={{fontSize:12,fontWeight:700,color:'var(--text3)',marginBottom:8}}>Preview</div>
+                    {(()=>{const total=toN(campDaily)*toN(campDuration);const cost=toN(campCost);return(<>
+                      {[{l:'Total Planned Sends',v:fmtNum(total)},{l:'Est. Replies at 2%',v:fmtNum(Math.round(total*0.02))},{l:'Est. Replies at 5%',v:fmtNum(Math.round(total*0.05))},{l:'Cost Per Send',v:`$${(cost/total).toFixed(4)}`},{l:'Cost/Reply at 2%',v:`$${(cost/(total*0.02)).toFixed(2)}`},{l:'Cost/Reply at 5%',v:`$${(cost/(total*0.05)).toFixed(2)}`}].map(({l,v})=>(
+                        <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:13}}><span style={{color:'var(--text3)'}}>{l}</span><span style={{fontFamily:'JetBrains Mono,monospace',color:'var(--text2)',fontWeight:600}}>{v}</span></div>
+                      ))}</>);})()}
                   </div>
                 )}
-                <button style={btnS('var(--purple)', false)} onClick={saveCampaign}>Create Campaign</button>
+                <button onClick={createCampaign} style={{width:'100%',minHeight:46,borderRadius:10,border:'none',background:'var(--purple)',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer'}}>Create Campaign</button>
               </div>
             )}
 
-            {activeCampaigns.map(c => {
-              const entries = c.dailyEntries || [];
-              const totalSent = entries.reduce((s, d) => s + toN(d.sent), 0);
-              const totalReplies = entries.reduce((s, d) => s + toN(d.replies), 0);
-              const totalQual = entries.reduce((s, d) => s + toN(d.qualified), 0);
-              const totalConts = entries.reduce((s, d) => s + toN(d.contracts), 0);
-              const planned = toN(c.dailySend) * toN(c.duration);
-              const prog = planned > 0 ? Math.min(100, (totalSent / planned) * 100) : 0;
-              const costPerReply = totalReplies > 0 ? '$' + (toN(c.cost) / totalReplies).toFixed(2) : '—';
-              return (
-                <div key={c.id} style={{ ...cardS(c.color || 'var(--gold)'), marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+            {campaigns.filter(c=>c.status==='active').map(camp=>{
+              const stats=campStats(camp);
+              const campRates=[
+                {l:'Deliverability',r:stats.delivRate,low:65,high:75},{l:'Reply Rate',r:stats.replyRate,low:2,high:5},
+                {l:'Conversation Rate',r:stats.convoRate,low:40,high:60},{l:'Qualification Rate',r:stats.qualRate,low:30,high:40},
+                {l:'Offer Rate',r:stats.offerRate,low:90,high:100},{l:'Response Rate',r:stats.respRate,low:25,high:35},{l:'Contract Rate',r:stats.contractRate,low:15,high:25},
+              ];
+              const cc=camp.color&&camp.color.startsWith('var')?camp.color:'var(--gold)';
+              return(
+                <div key={camp.id} style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:`4px solid ${cc}`,borderRadius:14,padding:'20px 24px',marginBottom:14}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10,marginBottom:14}}>
                     <div>
-                      <div style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)', marginBottom: 3 }}>{c.name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 8 }}>{c.county}{c.zips ? ' · ' + c.zips : ''}</div>
-                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        <Badge label={c.filterStack} color="var(--purple)" />
-                        <Badge label={`${c.listSize || 0} leads`} color="var(--cyan)" />
-                        <Badge label={`$${c.cost}`} color="var(--gold)" />
+                      <div style={{fontSize:16,fontWeight:800,color:'var(--text)',marginBottom:6}}>{camp.name}</div>
+                      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                        {camp.county&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text2)',border:'1px solid var(--border)'}}>{camp.county}</span>}
+                        {camp.filterStack&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text2)',border:'1px solid var(--border)'}}>{camp.filterStack}</span>}
+                        <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--green-faint)',color:'var(--green)',border:'1px solid var(--green-border)',fontWeight:700}}>ACTIVE</span>
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button style={{ ...btnS('var(--surface2)', false), fontSize: 12, color: 'var(--text2)', padding: '5px 10px', border: '1px solid var(--border)' }} onClick={() => setLogDay(logDay === c.id ? null : c.id)}>Log Day</button>
-                      <button style={{ ...btnS('var(--surface2)', false), fontSize: 12, color: 'var(--text3)', padding: '5px 10px', border: '1px solid var(--border)' }} onClick={() => archiveCampaign(c.id)}>Archive</button>
+                  </div>
+                  {stats.planned>0&&(
+                    <div style={{marginBottom:14}}>
+                      <div style={{display:'flex',justifyContent:'space-between',fontSize:13,color:'var(--text3)',marginBottom:6}}>
+                        <span>Texts sent: {stats.totalSent.toLocaleString()} of {stats.planned.toLocaleString()}</span>
+                        <span>{pct(stats.totalSent,stats.planned)}%</span>
+                      </div>
+                      <div style={{height:8,borderRadius:4,background:'var(--surface3)',overflow:'hidden'}}>
+                        <div style={{height:'100%',borderRadius:4,width:`${Math.min(100,pct(stats.totalSent,stats.planned))}%`,background:cc}}/>
+                      </div>
                     </div>
-                  </div>
-
-                  {/* Progress bar with percentage */}
-                  <div style={{ position: 'relative', height: 8, background: 'var(--surface3)', borderRadius: 4, marginBottom: 6 }}>
-                    <div style={{ height: '100%', borderRadius: 4, width: prog + '%', background: c.color || 'var(--gold)', transition: 'width 0.3s' }} />
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 14, display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{prog.toFixed(0)}% sent</span>
-                    <span className="num">{totalSent.toLocaleString()} of {planned.toLocaleString()}</span>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                    {[['Sent', totalSent, 'var(--text)'], ['Replies', totalReplies, 'var(--cyan)'], ['Reply Rate', pct(totalReplies, totalSent), 'var(--gold)'], ['Qualified', totalQual, 'var(--green)'], ['Contracts', totalConts, 'var(--purple)'], ['Cost/Reply', costPerReply, 'var(--text2)']].map(([l, v, cl]) => (
-                      <div key={l}>
-                        <div style={{ color: 'var(--text3)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{l}</div>
-                        <div className="num" style={{ color: cl, fontWeight: 700, fontSize: 16 }}>{v}</div>
+                  )}
+                  {campRates.map(({l,r,low,high})=>{
+                    const color=r>=high?'var(--gold)':r>=low?'var(--green)':'var(--red)';
+                    const status=r>=high?'ABOVE':r>=low?'IN RANGE':'BELOW';
+                    return(
+                      <div key={l} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid var(--border)',flexWrap:'wrap',gap:6}}>
+                        <span style={{fontSize:13,color:'var(--text2)'}}>{l}</span>
+                        <div style={{display:'flex',alignItems:'center',gap:8}}>
+                          <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:16,fontWeight:800,color}}>{r}%</span>
+                          <span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:color+'18',color,border:`1px solid ${color}40`,fontWeight:700}}>{status}</span>
+                          <span style={{fontSize:10,color:'var(--text3)'}}>target {low}–{high}%</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{display:'flex',gap:10,flexWrap:'wrap',padding:'10px 0 6px'}}>
+                    {[{l:'Sent',v:stats.totalSent},{l:'Replies',v:stats.replies},{l:'Qualified',v:stats.cQual},{l:'Contracts',v:stats.cContracts}].map(({l,v})=>(
+                      <div key={l} style={{textAlign:'center',padding:'8px 12px',borderRadius:8,background:'var(--surface3)'}}>
+                        <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:700,color:'var(--text)'}}>{v}</div>
+                        <div style={{fontSize:11,color:'var(--text3)'}}>{l}</div>
                       </div>
                     ))}
+                    {stats.costPerReply&&<div style={{textAlign:'center',padding:'8px 12px',borderRadius:8,background:'var(--surface3)'}}><div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:700,color:'var(--text)'}}>{'$'+stats.costPerReply}</div><div style={{fontSize:11,color:'var(--text3)'}}>Cost/Reply</div></div>}
+                    {stats.costPerContract&&<div style={{textAlign:'center',padding:'8px 12px',borderRadius:8,background:'var(--surface3)'}}><div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:700,color:'var(--green)'}}>{'$'+Number(stats.costPerContract).toLocaleString()}</div><div style={{fontSize:11,color:'var(--text3)'}}>Cost/Contract</div></div>}
+                  </div>
+                  <div style={{display:'flex',gap:8,marginTop:10}}>
+                    <button onClick={()=>setShowLogDay(showLogDay===camp.id?null:camp.id)} style={{padding:'8px 16px',borderRadius:8,border:'none',background:cc,color:'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>Log Day</button>
+                    <button style={{padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface3)',color:'var(--text2)',fontSize:13,cursor:'pointer'}}>Pause</button>
                   </div>
 
-                  {logDay === c.id && (
-                    <div style={{ marginTop: 14, padding: 16, background: 'var(--surface2)', borderRadius: 10, border: '1px solid var(--border)' }} className="slide-down">
-                      <div style={{ fontWeight: 700, marginBottom: 10, fontSize: 13 }}>Log Day</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 10 }}>
-                        {[['Date', 'date', 'date'], ['Sent', 'sent', 'number'], ['Landlines', 'landlines', 'number'], ['Opt-Outs', 'optOuts', 'number'], ['Replies', 'replies', 'number'], ['Qualified', 'qualified', 'number'], ['Offers', 'offers', 'number'], ['Responses', 'responses', 'number'], ['Contracts', 'contracts', 'number']].map(([l, k, t]) => (
-                          <div key={k}><label style={{ ...lbl, marginBottom: 3 }}>{l}</label><input type={t} style={{ ...inputS, padding: '7px 10px', fontSize: 13 }} value={dayForm[k]} onChange={e => setDayForm(p => ({ ...p, [k]: e.target.value }))} /></div>
+                  {showLogDay===camp.id&&(
+                    <div style={{marginTop:14,padding:'16px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)'}}>
+                      <div style={{fontSize:13,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',marginBottom:12}}>Log Day — {camp.name}</div>
+                      <div style={{marginBottom:12}}><DatePicker label="Date" value={ldDate} onChange={setLdDate}/></div>
+                      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(3,1fr)',gap:10}}>
+                        {[{l:'Sent',v:ldSent,set:setLdSent},{l:'Landlines',v:ldLandlines,set:setLdLandlines},{l:'Opt-Outs',v:ldOptOuts,set:setLdOptOuts}].map(({l,v,set})=>(
+                          <div key={l}><label style={LBL}>{l}</label><input style={INPUT} type="number" value={v} onChange={e=>set(e.target.value)} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                        ))}
+                        <div><label style={LBL}>Deliverable (auto)</label><div style={{minHeight:48,padding:'12px 16px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',color:'var(--cyan)',fontSize:15,display:'flex',alignItems:'center'}}>{Math.max(0,toN(ldSent)-toN(ldLandlines)-toN(ldOptOuts)).toLocaleString()}</div></div>
+                        {[{l:'Replies',v:ldReplies,set:setLdReplies},{l:'Conversations',v:ldConvos,set:setLdConvos},{l:'Qualified',v:ldQualified,set:setLdQualified},{l:'Offers Made',v:ldOffers,set:setLdOffers},{l:'Offer Responses',v:ldResponses,set:setLdResponses},{l:'Contracts',v:ldContracts,set:setLdContracts}].map(({l,v,set})=>(
+                          <div key={l}><label style={LBL}>{l}</label><input style={INPUT} type="number" value={v} onChange={e=>set(e.target.value)} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
                         ))}
                       </div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-                        <span>Deliverable: <b style={{ color: 'var(--text)' }}>{deliverable}</b></span>
-                        <span>Reply Rate: <b style={{ color: 'var(--text)' }}>{dReplyRate}</b></span>
-                        <span>Qualify Rate: <b style={{ color: 'var(--text)' }}>{dQualRate}</b></span>
-                        <span>Opt-Out Rate: <b style={{ color: 'var(--text)' }}>{dOptOutRate}</b></span>
-                      </div>
-                      <button style={btnS('var(--purple)', false)} onClick={saveDay}>Save Day</button>
+                      <button onClick={()=>saveLogDay(camp.id)} style={{marginTop:12,width:'100%',minHeight:46,borderRadius:10,border:'none',background:cc,color:'#000',fontWeight:800,fontSize:14,cursor:'pointer'}}>Save Day Log</button>
                     </div>
                   )}
                 </div>
               );
             })}
-
-            {activeCampaigns.length > 0 && (
-              <div style={{ ...cardS('var(--green)'), marginBottom: 16 }}>
-                <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 14 }}>All Campaigns Combined</div>
-                <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-                  {[['Total Sent', allCampSent.toLocaleString(), 'var(--text)'], ['Replies', allCampReplies, 'var(--cyan)'], ['Qualified', allCampQual, 'var(--green)'], ['Contracts', allCampContracts, 'var(--purple)'], ['Reply Rate', pct(allCampReplies, allCampSent), 'var(--gold)']].map(([l, v, c]) => (
-                    <div key={l}>
-                      <div style={{ color: 'var(--text3)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{l}</div>
-                      <div className="num" style={{ color: c, fontSize: 22, fontWeight: 800 }}>{v}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {archivedCampaigns.length > 0 && (
-              <details style={{ marginTop: 16 }}>
-                <summary style={{ cursor: 'pointer', color: 'var(--text3)', fontSize: 14, marginBottom: 10 }}>Archived Campaigns ({archivedCampaigns.length})</summary>
-                {archivedCampaigns.map(c => (
-                  <div key={c.id} style={{ ...cardS(), opacity: 0.6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <div>
-                      <span style={{ fontWeight: 600, color: 'var(--text)' }}>{c.name}</span>
-                      <span style={{ marginLeft: 10, fontSize: 12, color: 'var(--text3)' }}>{c.county}</span>
-                    </div>
-                    <button style={{ ...btnS('var(--red-faint)', false), color: 'var(--red)', border: '1px solid var(--red-border)', fontSize: 12, padding: '4px 10px' }} onClick={() => deleteCampaign(c.id)}>Delete</button>
-                  </div>
-                ))}
-              </details>
-            )}
           </>
         )}
 
-        {/* ── LEAD GEN TAB ── */}
-        {tab === 'Lead Gen' && (
+        {/* COMBINED TAB */}
+        {mainTab==='Combined'&&(
           <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span style={{ fontWeight: 700, fontSize: 15 }}>Lead Generation Channels</span>
-              <button style={btnS('var(--cyan)', false)} onClick={() => setShowStratForm(!showStratForm)}>{showStratForm ? '✕ Cancel' : '+ Add Channel'}</button>
+            <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:`3px solid ${paceColor}`,borderRadius:14,padding:'20px 24px',marginBottom:14}}>
+              <div style={SEC}>90-Day Goal Progress</div>
+              <div style={{height:8,borderRadius:4,background:'var(--surface3)',overflow:'hidden',marginBottom:12}}>
+                <div style={{height:'100%',borderRadius:4,width:`${Math.min(100,pct(combinedContracts,goalContracts))}%`,background:paceColor,transition:'width 0.5s ease'}}/>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
+                <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:48,fontWeight:900,color:paceColor,lineHeight:1}}>{combinedContracts}</div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:22,fontWeight:800,color:paceColor}}>{paceStatus}</div>
+                  <div style={{fontSize:13,color:'var(--text3)'}}>{goalContracts} contracts by July 25, 2026</div>
+                  <div style={{fontSize:13,color:'var(--text3)'}}>{daysLeft} days remaining</div>
+                </div>
+              </div>
             </div>
-            {showStratForm && (
-              <div style={{ ...cardS('var(--cyan)'), marginBottom: 16 }} className="slide-down">
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
-                  <div><label style={lbl}>Channel Name</label><input style={inputS} value={stratForm.name} onChange={e => setStratForm(p => ({ ...p, name: e.target.value }))} /></div>
-                  <div><label style={lbl}>Notes</label><input style={inputS} value={stratForm.notes} onChange={e => setStratForm(p => ({ ...p, notes: e.target.value }))} /></div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                  {PALETTE.map(c => <div key={c} onClick={() => setStratForm(p => ({ ...p, color: c }))} style={{ width: 28, height: 28, borderRadius: '50%', background: c, cursor: 'pointer', outline: stratForm.color === c ? `3px solid ${c}55` : 'none', outlineOffset: 2 }} />)}
-                </div>
-                <button style={btnS('var(--cyan)', false)} onClick={saveStrategy}>Add Channel</button>
-              </div>
-            )}
-            {strategies.map(s => (
-              <div key={s.id} style={{ ...cardS(s.color || 'var(--gold)'), display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                <div>
-                  <span style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14 }}>{s.name}</span>
-                  {s.notes && <span style={{ marginLeft: 10, fontSize: 13, color: 'var(--text3)' }}>{s.notes}</span>}
-                  {s.builtin && <span style={{ marginLeft: 8, fontSize: 11, padding: '1px 6px', borderRadius: 4, background: 'var(--surface3)', color: 'var(--text3)' }}>built-in</span>}
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div onClick={() => toggleStrategy(s.id, !s.active)} style={{ width: 40, height: 22, borderRadius: 11, background: s.active ? 'var(--green)' : 'var(--surface3)', cursor: 'pointer', position: 'relative', transition: 'background 0.2s', border: '1px solid var(--border)' }}>
-                    <div style={{ position: 'absolute', top: 2, left: s.active ? 20 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
-                  </div>
-                  <span style={{ fontSize: 12, color: s.active ? 'var(--green)' : 'var(--text3)', fontWeight: 600 }}>{s.active ? 'Active' : 'Paused'}</span>
-                  {!s.builtin && <button onClick={() => deleteStrategy(s.id)} style={{ background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 14 }}>✕</button>}
-                </div>
-              </div>
-            ))}
-          </>
-        )}
 
-        {/* ── DIAGNOSTICS TAB ── */}
-        {tab === 'Diagnostics' && (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div style={cardS('var(--gold)')}>
-                <div style={{ fontWeight: 700, color: 'var(--gold)', marginBottom: 16, fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.05em' }}>WCL Diagnostics</div>
-                <DiagRow label="Avg Leads/day" value={avgReceived.toFixed(1)} target="10" />
-                <DiagRow label="Avg Accepted/day" value={avgAccepted.toFixed(1)} target="8" />
-                <DiagRow label="Avg Convos/day" value={avgConvos.toFixed(1)} target="6" />
-                <DiagRow label="Avg Qualified/day" value={avgQual.toFixed(1)} target="2" />
-                <DiagRow label="Avg Offers/day" value={avgOffers.toFixed(1)} target="5" />
-                <DiagRow label="Offer Response Rate" value={offerRespRate.toFixed(1)} target="30" unit="%" />
-                <DiagRow label="Total Contracts" value={String(totalContracts)} target="1" />
-                <div style={{ marginTop: 14, padding: 12, background: 'var(--gold-faint)', border: '1px solid var(--gold-border)', borderRadius: 8, fontSize: 13, color: 'var(--text2)' }}>
-                  {avgReceived < 10 && <div style={{ marginBottom: 4 }}>📉 Lead volume below 10/day — check Propwire filters.</div>}
-                  {avgAccepted / Math.max(avgReceived, 1) < 0.5 && <div style={{ marginBottom: 4 }}>⚠ Low accept rate — review rejection reasons.</div>}
-                  {avgOffers < 5 && <div style={{ marginBottom: 4 }}>⚠ Offer volume low — target 5 offers daily.</div>}
-                  {totalContracts === 0 && <div>🔴 No contracts yet — increase offer volume.</div>}
-                  {totalContracts > 0 && <div style={{ color: 'var(--green)' }}>✅ {totalContracts} contract{totalContracts !== 1 ? 's' : ''} closed. Keep pushing!</div>}
+            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:12,marginBottom:14}}>
+              {[
+                {l:'WCL Contracts',v:totalWCLContracts,c:'var(--gold)'},
+                {l:'SMS Contracts',v:totalSMSContracts,c:'var(--cyan)'},
+                {l:'Total Contracts',v:combinedContracts,c:paceColor},
+                {l:'Goal',v:goalContracts,c:'var(--text3)'},
+              ].map(s=>(
+                <div key={s.l} style={{...CARD,textAlign:'center',padding:'16px'}}>
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:28,fontWeight:800,color:s.c,marginBottom:4}}>{s.v}</div>
+                  <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)'}}>{s.l}</div>
                 </div>
-              </div>
-              <div style={cardS('var(--purple)')}>
-                <div style={{ fontWeight: 700, color: 'var(--purple)', marginBottom: 16, fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.05em' }}>SMS Diagnostics</div>
-                <DiagRow label="Reply Rate" value={pct(allCampReplies, allCampSent).replace('%', '')} target="3" unit="%" />
-                <DiagRow label="Conversation Rate" value={pct(allCampQual, allCampReplies).replace('%', '')} target="20" unit="%" />
-                <DiagRow label="Opt-Out Rate" value={activeCampaigns.reduce((s, c) => (c.dailyEntries || []).reduce((a, d) => a + toN(d.optOuts), 0) + s, 0)} target={Math.round(allCampSent * 0.05)} reverse />
-                <DiagRow label="Contracts" value={String(allCampContracts)} target="1" />
-                <div style={{ marginTop: 14, padding: 12, background: 'var(--purple-faint)', border: '1px solid var(--purple-border)', borderRadius: 8, fontSize: 13, color: 'var(--text2)' }}>
-                  {allCampReplies / Math.max(allCampSent, 1) < 0.03 && <div style={{ marginBottom: 4 }}>📉 Reply rate under 3% — check filter stack and copy.</div>}
-                  {allCampQual / Math.max(allCampReplies, 1) < 0.2 && <div style={{ marginBottom: 4 }}>⚠ Low qualify rate — improve follow-up script.</div>}
-                  {allCampContracts === 0 && <div>🔴 No SMS contracts yet.</div>}
-                </div>
-              </div>
+              ))}
             </div>
-            <div style={{ ...cardS('var(--green)'), marginTop: 4 }}>
-              <div style={{ fontWeight: 700, color: 'var(--green)', marginBottom: 14, fontSize: 14, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Combined — All Channels</div>
-              <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap' }}>
-                {[['Total Offers', totalOffers + activeCampaigns.reduce((s, c) => (c.dailyEntries || []).reduce((a, d) => a + toN(d.offers), 0) + s, 0), 'var(--cyan)'],
-                  ['Total Contracts', totalContracts + allCampContracts, 'var(--green)'],
-                  ['WCL Contracts', totalContracts, 'var(--gold)'],
-                  ['SMS Contracts', allCampContracts, 'var(--purple)']].map(([l, v, c]) => (
-                    <div key={l}>
-                      <div style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{l}</div>
-                      <div className="num" style={{ fontSize: 26, fontWeight: 800, color: c }}>{v}</div>
-                    </div>
-                  ))}
+
+            <div style={CARD}>
+              <div style={SEC}>Channel Comparison</div>
+              <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr',gap:'0',borderRadius:10,overflow:'hidden',border:'1px solid var(--border)'}}>
+                {[{},{},...funnelRates].map((row,i)=>{
+                  if(i===0) return <div key="h0" style={{padding:'10px 14px',background:'var(--surface3)',borderBottom:'1px solid var(--border)',fontWeight:700,color:'var(--text3)',fontSize:12}}>Metric</div>;
+                  if(i===1) return <><div key="h1" style={{padding:'10px 14px',background:'var(--surface3)',borderBottom:'1px solid var(--border)',fontWeight:700,color:'var(--gold)',fontSize:12}}>WCL</div><div key="h2" style={{padding:'10px 14px',background:'var(--surface3)',borderBottom:'1px solid var(--border)',fontWeight:700,color:'var(--cyan)',fontSize:12}}>SMS Avg</div></>;
+                  const fr=funnelRates[i-2];if(!fr)return null;
+                  const smsCampRates=campaigns.filter(c=>c.status==='active').map(camp=>campStats(camp));
+                  const smsAvg=smsCampRates.length>0?Math.round(smsCampRates.reduce((s,st)=>{const key=['delivRate','replyRate','convoRate','qualRate','offerRate','respRate','contractRate'][i-2];return s+(st[key]||0);},0)/smsCampRates.length):0;
+                  const wclWins=fr.r>smsAvg;
+                  return [
+                    <div key={`l${i}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',color:'var(--text2)',fontSize:13}}>{fr.l}</div>,
+                    <div key={`w${i}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',fontSize:15,fontWeight:700,color:wclWins?'var(--gold)':'var(--text3)',background:wclWins?'var(--gold-faint)':'transparent'}}>{fr.r}%</div>,
+                    <div key={`s${i}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',fontSize:15,fontWeight:700,color:!wclWins?'var(--cyan)':'var(--text3)',background:!wclWins?'var(--cyan-faint)':'transparent'}}>{smsAvg}%</div>,
+                  ];
+                })}
               </div>
             </div>
           </>
         )}
       </div>
+
+      {isMobile&&(
+        <nav style={{position:'fixed',bottom:0,left:0,right:0,height:64,background:'var(--surface)',borderTop:'1px solid var(--border)',display:'flex',alignItems:'center',zIndex:100}}>
+          {[{href:'/',icon:'⌂',label:'Home'},{href:'/calculator',icon:'◈',label:'Offers'},{href:'/kpi',icon:'◉',label:'KPI'},{href:'/revenue',icon:'◆',label:'Revenue'},{href:'/scorecard',icon:'◐',label:'Score'}].map(item=>(
+            <div key={item.href} onClick={()=>router.push(item.href)} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,cursor:'pointer',color:item.href==='/kpi'?'var(--gold)':'var(--text3)'}}>
+              <span style={{fontSize:18}}>{item.icon}</span><span style={{fontSize:10,fontWeight:600}}>{item.label}</span>
+            </div>
+          ))}
+        </nav>
+      )}
     </div>
   );
 }
+
+function fmtNum(n){return Number(n||0).toLocaleString('en-US');}

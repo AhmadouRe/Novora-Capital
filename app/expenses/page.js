@@ -2,7 +2,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import DatePicker from '../components/DatePicker';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 /* ─── helpers ─────────────────────────────────────────────── */
 function toN(v) { const n = parseFloat(String(v || 0).replace(/[^0-9.]/g, '')); return isNaN(n) ? 0 : n; }
@@ -19,10 +18,7 @@ const ACCTS = [
   { key: 'marketing', label: 'Marketing',  color: 'var(--gold)',   icon: '◆' },
   { key: 'operating', label: 'Operating',  color: 'var(--cyan)',   icon: '◉' },
   { key: 'reserve',   label: 'Reserve',    color: 'var(--purple)', icon: '◈' },
-  { key: 'taxes',     label: 'Taxes',      color: 'var(--red)',    icon: '◍' },
-  { key: 'owner',     label: 'Owner Pay',  color: 'var(--green)',  icon: '◐' },
 ];
-const ACCT_KEYS = ACCTS.map(a => a.key);
 const acctByKey = Object.fromEntries(ACCTS.map(a => [a.key, a]));
 
 const CATEGORIES = ['Advertising','Software/Tools','Professional Services','Office Supplies','Travel','Meals','Insurance','Utilities','Equipment','Contractor Pay','Legal','Other'];
@@ -97,19 +93,6 @@ function Row({ label, children }) {
   );
 }
 
-/* ─── custom tooltip for bar chart ───────────────────────── */
-function ChartTip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontSize: 13 }}>
-      <div style={{ fontWeight: 700, marginBottom: 4 }}>{label}</div>
-      {payload.map((p, i) => (
-        <div key={i} style={{ color: p.color || 'var(--text)', marginBottom: 2 }}>{p.name}: {fmt(p.value)}</div>
-      ))}
-    </div>
-  );
-}
-
 /* ═══════════════════════════════════════════════════════════ */
 export default function ExpensesPage() {
   const router = useRouter();
@@ -117,20 +100,24 @@ export default function ExpensesPage() {
   const [loading, setLoading] = useState(true);
 
   /* data */
-  const [budgets, setBudgets] = useState({ marketing: 0, operating: 0, reserve: 0, owner: 0, taxes: 0 });
+  const [budgets, setBudgets] = useState({ marketing: 0, operating: 0, reserve: 0 });
   const [entries, setEntries] = useState([]);
-  const [transfers, setTransfers] = useState([]);
   const [recurring, setRecurring] = useState([]);
 
   /* ui */
   const [filterAcct, setFilterAcct] = useState('all');
   const [filterType, setFilterType] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showTransferModal, setShowTransferModal] = useState(false);
   const [showRecurringModal, setShowRecurringModal] = useState(false);
   const [editRecurring, setEditRecurring] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [tab, setTab] = useState('expenses'); /* expenses | chart | recurring | transfers */
+  const [tab, setTab] = useState('expenses');
+
+  /* edit expense inline */
+  const [editEntryId, setEditEntryId] = useState(null);
+  const [editEntryVendor, setEditEntryVendor] = useState('');
+  const [editEntryAmount, setEditEntryAmount] = useState('');
+  const [editEntryDate, setEditEntryDate] = useState('');
 
   /* add expense form */
   const [fAcct, setFAcct] = useState('marketing');
@@ -142,11 +129,6 @@ export default function ExpensesPage() {
   const [fIsRec, setFIsRec] = useState(false);
   const [fFreq, setFFreq] = useState('Monthly');
   const [fEndDate, setFEndDate] = useState('');
-
-  /* transfer form */
-  const [tAmt, setTAmt] = useState('');
-  const [tTo, setTTo] = useState('marketing');
-  const [tNote, setTNote] = useState('');
 
   /* recurring form */
   const [rVendor, setRVendor] = useState('');
@@ -165,18 +147,45 @@ export default function ExpensesPage() {
     }).catch(() => setLoading(false));
   }, []);
 
+  /* ── auto-log tracking ── */
+  const didAutoLogRef = useRef(false);
+
   /* ── fetch data ── */
-  const reload = useCallback(async () => {
-    const [b, e, t, r] = await Promise.all([
+  const reload = useCallback(async (skipAutoLog = false) => {
+    const [b, e, r] = await Promise.all([
       fetch('/api/expenses/budgets').then(r => r.ok ? r.json() : {}),
       fetch('/api/expenses').then(r => r.ok ? r.json() : []),
-      fetch('/api/expenses/transfer').then(r => r.ok ? r.json() : []),
       fetch('/api/expenses/recurring').then(r => r.ok ? r.json() : []),
     ]);
     setBudgets(b || {});
-    setEntries(Array.isArray(e) ? e : []);
-    setTransfers(Array.isArray(t) ? t : []);
-    setRecurring(Array.isArray(r) ? r : []);
+    const entryList = Array.isArray(e) ? e : [];
+    const recList = Array.isArray(r) ? r : [];
+    setEntries(entryList);
+    setRecurring(recList);
+
+    /* auto-log monthly recurring (once per page load) */
+    if (!skipAutoLog && !didAutoLogRef.current) {
+      didAutoLogRef.current = true;
+      const monthStart = TODAY.slice(0, 7) + '-01';
+      let autoLogged = false;
+      for (const rec of recList.filter(r => r.active !== false && r.frequency === 'Monthly')) {
+        const exists = entryList.some(e =>
+          (e.recurringId === rec.id || (e.vendor === rec.vendor && e.account === rec.account && e.recurring)) &&
+          (e.date || '') >= monthStart
+        );
+        if (!exists) {
+          await fetch('/api/expenses', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vendor: rec.vendor, amount: rec.amount, account: rec.account, category: rec.category, date: TODAY, recurring: true, recurringId: rec.id, frequency: rec.frequency }),
+          });
+          autoLogged = true;
+        }
+      }
+      if (autoLogged) {
+        const fresh = await fetch('/api/expenses').then(r => r.ok ? r.json() : []);
+        setEntries(Array.isArray(fresh) ? fresh : []);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -185,33 +194,18 @@ export default function ExpensesPage() {
 
   /* ── computed ── */
   const spent = useCallback((key) => {
-    return entries.filter(e => e.account === key).reduce((s, e) => s + toN(e.amount), 0);
+    return entries.filter(e => e.account === key && !e.autoAllocated).reduce((s, e) => s + toN(e.amount), 0);
   }, [entries]);
 
-  const transferredTo = useCallback((key) => {
-    return transfers.filter(t => t.to === key).reduce((s, t) => s + toN(t.amount), 0);
-  }, [transfers]);
-
-  const transferredFrom = useCallback((key) => {
-    return transfers.filter(t => t.from === key).reduce((s, t) => s + toN(t.amount), 0);
-  }, [transfers]);
-
-  function allocated(key) {
-    const base = toN(budgets[key]);
-    if (key === 'reserve') return base - transferredFrom('reserve');
-    return base + transferredTo(key);
-  }
-
-  function remaining(key) {
-    return allocated(key) - spent(key);
-  }
+  function allocated(key) { return toN(budgets[key]); }
+  function remaining(key) { return allocated(key) - spent(key); }
 
   /* ── filtered entries ── */
   const visibleEntries = entries.filter(e => {
+    if (e.autoAllocated) return false;
     if (filterAcct !== 'all' && e.account !== filterAcct) return false;
     if (filterType === 'recurring' && !e.recurring) return false;
-    if (filterType === 'one-time' && (e.recurring || e.autoAllocated)) return false;
-    if (filterType === 'auto' && !e.autoAllocated) return false;
+    if (filterType === 'one-time' && e.recurring) return false;
     return true;
   }).sort((a, b) => (b.date || b.loggedAt || '').localeCompare(a.date || a.loggedAt || ''));
 
@@ -219,40 +213,56 @@ export default function ExpensesPage() {
   async function submitExpense() {
     if (!fVendor.trim() || !fAmount || !fDate) return;
     setSaving(true);
-    const body = {
-      account: fAcct,
-      vendor: fVendor.trim(),
-      amount: toN(fAmount),
-      category: fCat,
-      date: fDate,
-      notes: fNotes,
-      recurring: fIsRec,
-      frequency: fIsRec ? fFreq : null,
-      endDate: fIsRec && fEndDate ? fEndDate : null,
-    };
+    const body = { account: fAcct, vendor: fVendor.trim(), amount: toN(fAmount), category: fCat, date: fDate, notes: fNotes, recurring: fIsRec, frequency: fIsRec ? fFreq : null, endDate: fIsRec && fEndDate ? fEndDate : null };
     const r = await fetch('/api/expenses', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     if (r.ok) {
       setFVendor(''); setFAmount(''); setFCat(''); setFDate(TODAY); setFNotes(''); setFIsRec(false); setFEndDate('');
       setShowAddModal(false);
-      await reload();
+      await reload(true);
     }
     setSaving(false);
   }
 
-  /* ── transfer ── */
-  async function submitTransfer() {
-    if (!tAmt || toN(tAmt) <= 0) return;
-    const avail = remaining('reserve');
-    if (toN(tAmt) > avail) return;
-    setSaving(true);
-    const body = { from: 'reserve', to: tTo, amount: toN(tAmt), note: tNote, date: TODAY };
-    const r = await fetch('/api/expenses/transfer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    if (r.ok) {
-      setTAmt(''); setTTo('marketing'); setTNote('');
-      setShowTransferModal(false);
-      await reload();
-    }
-    setSaving(false);
+  /* ── edit expense ── */
+  function openEditEntry(e) {
+    setEditEntryId(e.id);
+    setEditEntryVendor(e.vendor);
+    setEditEntryAmount(String(e.amount));
+    setEditEntryDate(e.date || '');
+  }
+
+  async function saveEditEntry() {
+    await fetch(`/api/expenses/${editEntryId}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vendor: editEntryVendor, amount: toN(editEntryAmount), date: editEntryDate }),
+    });
+    setEditEntryId(null);
+    await reload(true);
+  }
+
+  async function deleteEntry(id) {
+    if (!confirm('Delete this expense?')) return;
+    await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
+    await reload(true);
+  }
+
+  /* ── recurring management ── */
+  async function stopRecurring(rec) {
+    await fetch(`/api/expenses/recurring/${rec.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: false }) });
+    await reload(true);
+  }
+
+  async function resumeRecurring(rec) {
+    await fetch(`/api/expenses/recurring/${rec.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: true }) });
+    await reload(true);
+  }
+
+  async function deleteRecurring(rec) {
+    if (!confirm(`Delete "${rec.vendor}" schedule and all its logged history?`)) return;
+    const matching = entries.filter(e => e.recurringId === rec.id || (e.vendor === rec.vendor && e.account === rec.account && e.recurring));
+    await Promise.all(matching.map(e => fetch(`/api/expenses/${e.id}`, { method: 'DELETE' })));
+    await fetch(`/api/expenses/recurring/${rec.id}`, { method: 'DELETE' });
+    await reload(true);
   }
 
   /* ── save recurring ── */
@@ -269,19 +279,9 @@ export default function ExpensesPage() {
     if (r.ok) {
       setRVendor(''); setRAmt(''); setRCat(''); setRStartDate(TODAY); setREndDate(''); setEditRecurring(null);
       setShowRecurringModal(false);
-      await reload();
+      await reload(true);
     }
     setSaving(false);
-  }
-
-  async function deleteRecurring(id) {
-    await fetch(`/api/expenses/recurring/${id}`, { method: 'DELETE' });
-    await reload();
-  }
-
-  async function deleteEntry(id) {
-    await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
-    await reload();
   }
 
   function openEditRecurring(rec) {
@@ -296,14 +296,6 @@ export default function ExpensesPage() {
     setShowRecurringModal(true);
   }
 
-  /* ── chart data ── */
-  const chartData = ACCTS.map(a => ({
-    name: a.label,
-    allocated: allocated(a.key),
-    spent: spent(a.key),
-    remaining: Math.max(0, remaining(a.key)),
-  }));
-
   /* ── guards ── */
   if (loading) return <div style={{ minHeight: '100vh', background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text2)' }}>Loading…</div>;
   if (!session) { router.push('/'); return null; }
@@ -313,7 +305,6 @@ export default function ExpensesPage() {
         <div style={{ fontSize: 32 }}>🔒</div>
         <div style={{ fontSize: 20, fontWeight: 700 }}>Access Denied</div>
         <div style={{ color: 'var(--text2)', fontSize: 14 }}>You don't have access to Expense Tracker.</div>
-        <div style={{ color: 'var(--text2)', fontSize: 13 }}>Contact Ahmadou to request access.</div>
         <button onClick={() => router.push('/')} style={{ marginTop: 16, padding: '10px 24px', borderRadius: 8, border: 'none', background: 'var(--surface2)', color: 'var(--text)', fontWeight: 600, cursor: 'pointer' }}>Back to Home</button>
       </div>
     );
@@ -326,8 +317,8 @@ export default function ExpensesPage() {
   const pill = (active) => ({ padding: '6px 14px', borderRadius: 20, border: `1px solid ${active ? 'var(--gold)' : 'var(--border)'}`, background: active ? 'var(--gold-faint)' : 'transparent', color: active ? 'var(--gold)' : 'var(--text2)', fontWeight: 600, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' });
   const tabBtn = (active) => ({ padding: '8px 16px', border: 'none', background: 'none', color: active ? 'var(--text)' : 'var(--text2)', fontWeight: active ? 700 : 400, fontSize: 14, cursor: 'pointer', borderBottom: `2px solid ${active ? 'var(--orange)' : 'transparent'}`, transition: 'all 0.15s' });
 
-  const totalAllocated = ACCT_KEYS.reduce((s, k) => s + toN(budgets[k]), 0);
-  const totalSpent = ACCT_KEYS.reduce((s, k) => s + spent(k), 0);
+  const totalAllocated = ACCTS.reduce((s, a) => s + toN(budgets[a.key]), 0);
+  const totalSpent = ACCTS.reduce((s, a) => s + spent(a.key), 0);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)', paddingBottom: 40 }}>
@@ -370,14 +361,9 @@ export default function ExpensesPage() {
             const over = rem < 0;
             return (
               <div key={a.key} style={{ background: 'var(--surface)', border: `1px solid ${a.color}44`, borderRadius: 14, padding: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ color: a.color, fontSize: 16 }}>{a.icon}</span>
-                    <span style={{ fontWeight: 700, fontSize: 14 }}>{a.label}</span>
-                  </div>
-                  {a.key === 'reserve' && (
-                    <button onClick={() => setShowTransferModal(true)} style={{ padding: '4px 10px', borderRadius: 6, border: `1px solid ${a.color}`, background: 'transparent', color: a.color, fontWeight: 600, fontSize: 11, cursor: 'pointer' }}>Transfer</button>
-                  )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <span style={{ color: a.color, fontSize: 16 }}>{a.icon}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>{a.label}</span>
                 </div>
                 <div style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 24, fontWeight: 700, color: a.color, marginBottom: 4 }}>{fmt(alloc)}</div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>allocated</div>
@@ -393,7 +379,7 @@ export default function ExpensesPage() {
 
         {/* Tab bar */}
         <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
-          {[['expenses','Expenses'],['chart','Budget Chart'],['recurring','Recurring'],['transfers','Transfer Log']].map(([k, l]) => (
+          {[['expenses','Expenses'],['recurring','Recurring']].map(([k, l]) => (
             <button key={k} onClick={() => setTab(k)} style={tabBtn(tab === k)}>{l}</button>
           ))}
         </div>
@@ -401,25 +387,47 @@ export default function ExpensesPage() {
         {/* ── Tab: Expenses ── */}
         {tab === 'expenses' && (
           <>
-            {/* Filters */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
               <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600 }}>Account:</span>
               {[['all','All'],...ACCTS.map(a => [a.key, a.label])].map(([k, l]) => (
                 <button key={k} onClick={() => setFilterAcct(k)} style={pill(filterAcct === k)}>{l}</button>
               ))}
               <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text2)', fontWeight: 600 }}>Type:</span>
-              {[['all','All'],['one-time','One-Time'],['recurring','Recurring'],['auto','Auto']].map(([k, l]) => (
+              {[['all','All'],['one-time','One-Time'],['recurring','Recurring']].map(([k, l]) => (
                 <button key={k} onClick={() => setFilterType(k)} style={pill(filterType === k)}>{l}</button>
               ))}
             </div>
 
-            {/* Expense list */}
             {visibleEntries.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text2)' }}>No expenses found.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {visibleEntries.map(e => {
                   const a = acctByKey[e.account] || ACCTS[0];
+                  const isEditing = editEntryId === e.id;
+                  if (isEditing) {
+                    return (
+                      <div key={e.id} style={{ background: 'var(--surface)', border: '1px solid var(--gold-border)', borderRadius: 10, padding: '14px 16px' }}>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                          <div style={{ flex: 2, minWidth: 140 }}>
+                            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>Vendor</div>
+                            <input value={editEntryVendor} onChange={e => setEditEntryVendor(e.target.value)} style={{ ...inp, padding: '7px 10px' }} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 100 }}>
+                            <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>Amount</div>
+                            <CurrIn value={editEntryAmount} onChange={setEditEntryAmount} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 130 }}>
+                            <DatePicker value={editEntryDate} onChange={setEditEntryDate} placeholder="Date" />
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={() => setEditEntryId(null)} style={{ flex: 1, padding: '8px', borderRadius: 7, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontWeight: 600, cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                          <button onClick={saveEditEntry} style={{ flex: 2, padding: '8px', borderRadius: 7, border: 'none', background: 'var(--orange)', color: '#fff', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>Save</button>
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
                     <div key={e.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14 }}>
                       <div style={{ width: 36, height: 36, borderRadius: 8, background: a.color + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', color: a.color, fontSize: 16, flexShrink: 0 }}>{a.icon}</div>
@@ -428,52 +436,22 @@ export default function ExpensesPage() {
                         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                           <Badge label={a.label} color={a.color} />
                           {e.category && <Badge label={e.category} color="var(--text2)" />}
-                          {e.autoAllocated && <Badge label="AUTO" color="var(--cyan)" />}
                           {e.recurring && <Badge label={e.frequency || 'Recurring'} color="var(--purple)" />}
                           <span style={{ fontSize: 11, color: 'var(--text2)' }}>{fmtDate(e.date)}</span>
                         </div>
                       </div>
                       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                        <div style={{ fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>{fmt(e.amount)}</div>
+                        <div style={{ fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, fontSize: 15, color: 'var(--red)' }}>-{fmt(e.amount)}</div>
                         <div style={{ fontSize: 11, color: 'var(--text2)' }}>{e.loggedBy}</div>
                       </div>
-                      {!e.autoAllocated && (
-                        <button onClick={() => deleteEntry(e.id)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 16, cursor: 'pointer', padding: '4px 6px', borderRadius: 4 }} title="Delete">✕</button>
-                      )}
+                      <button onClick={() => openEditEntry(e)} style={{ background: 'none', border: 'none', color: 'var(--text2)', fontSize: 15, cursor: 'pointer', padding: '4px 6px', borderRadius: 4 }} title="Edit">✎</button>
+                      <button onClick={() => deleteEntry(e.id)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 16, cursor: 'pointer', padding: '4px 6px', borderRadius: 4 }} title="Delete">✕</button>
                     </div>
                   );
                 })}
               </div>
             )}
           </>
-        )}
-
-        {/* ── Tab: Budget Chart ── */}
-        {tab === 'chart' && (
-          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 20 }}>Budget vs. Spending by Account</div>
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={chartData} barCategoryGap="30%" barGap={4}>
-                <XAxis dataKey="name" tick={{ fill: 'var(--text2)', fontSize: 12 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: 'var(--text2)', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
-                <Tooltip content={<ChartTip />} cursor={{ fill: 'var(--surface2)' }} />
-                <Bar dataKey="allocated" name="Allocated" radius={[4, 4, 0, 0]}>
-                  {chartData.map((_, i) => <Cell key={i} fill={ACCTS[i].color + '55'} />)}
-                </Bar>
-                <Bar dataKey="spent" name="Spent" radius={[4, 4, 0, 0]}>
-                  {chartData.map((_, i) => <Cell key={i} fill={ACCTS[i].color} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            <div style={{ display: 'flex', gap: 16, justifyContent: 'center', marginTop: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text2)' }}>
-                <div style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--text2)', opacity: 0.4 }} /> Allocated
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text2)' }}>
-                <div style={{ width: 12, height: 12, borderRadius: 2, background: 'var(--text)' }} /> Spent
-              </div>
-            </div>
-          </div>
         )}
 
         {/* ── Tab: Recurring ── */}
@@ -488,8 +466,9 @@ export default function ExpensesPage() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {recurring.map(r => {
                   const a = acctByKey[r.account] || ACCTS[0];
+                  const isActive = r.active !== false;
                   return (
-                    <div key={r.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <div key={r.id} style={{ background: 'var(--surface)', border: `1px solid ${isActive ? 'var(--border)' : 'var(--border2)'}`, borderRadius: 10, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14, opacity: isActive ? 1 : 0.65 }}>
                       <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--purple)22', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--purple)', fontSize: 16, flexShrink: 0 }}>↺</div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{r.vendor}</div>
@@ -497,46 +476,19 @@ export default function ExpensesPage() {
                           <Badge label={a.label} color={a.color} />
                           <Badge label={r.frequency || 'Monthly'} color="var(--purple)" />
                           {r.category && <Badge label={r.category} color="var(--text2)" />}
-                          <span style={{ fontSize: 11, color: 'var(--text2)' }}>Since {fmtDate(r.startDate)}{r.endDate ? ` → ${fmtDate(r.endDate)}` : ''}</span>
+                          {!isActive && <Badge label="STOPPED" color="var(--red)" />}
+                          <span style={{ fontSize: 11, color: 'var(--text2)' }}>Since {fmtDate(r.startDate)}</span>
                         </div>
                       </div>
                       <div style={{ fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, fontSize: 15, color: 'var(--purple)' }}>{fmt(r.amount)}</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
                         <button onClick={() => openEditRecurring(r)} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text2)', fontSize: 11, padding: '4px 8px', borderRadius: 4, cursor: 'pointer' }}>Edit</button>
-                        <button onClick={() => deleteRecurring(r.id)} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 16, cursor: 'pointer', padding: '4px 6px', borderRadius: 4 }}>✕</button>
+                        {isActive
+                          ? <button onClick={() => stopRecurring(r)} style={{ background: 'none', border: '1px solid var(--orange-border)', color: 'var(--orange)', fontSize: 11, padding: '4px 8px', borderRadius: 4, cursor: 'pointer' }}>Stop</button>
+                          : <button onClick={() => resumeRecurring(r)} style={{ background: 'none', border: '1px solid var(--green-border)', color: 'var(--green)', fontSize: 11, padding: '4px 8px', borderRadius: 4, cursor: 'pointer' }}>Resume</button>
+                        }
+                        <button onClick={() => deleteRecurring(r)} style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '4px 6px', borderRadius: 4 }}>✕</button>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ── Tab: Transfer Log ── */}
-        {tab === 'transfers' && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-              <button onClick={() => setShowTransferModal(true)} style={btn('var(--purple)', true)}>Transfer from Reserve</button>
-            </div>
-            {transfers.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text2)' }}>No transfers recorded.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {[...transfers].reverse().map(t => {
-                  const toAcct = acctByKey[t.to] || ACCTS[0];
-                  return (
-                    <div key={t.id} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 14 }}>
-                      <div style={{ width: 36, height: 36, borderRadius: 8, background: 'var(--purple)22', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--purple)', fontSize: 16, flexShrink: 0 }}>⇄</div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>Reserve → {toAcct.label}</div>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          {t.note && <span style={{ fontSize: 12, color: 'var(--text2)' }}>{t.note}</span>}
-                          <span style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtDate(t.date)}</span>
-                          <span style={{ fontSize: 11, color: 'var(--text3)' }}>{t.loggedBy}</span>
-                        </div>
-                      </div>
-                      <div style={{ fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, fontSize: 15, color: 'var(--purple)' }}>{fmt(t.amount)}</div>
                     </div>
                   );
                 })}
@@ -599,33 +551,6 @@ export default function ExpensesPage() {
           <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
             <button onClick={() => setShowAddModal(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
             <button onClick={submitExpense} disabled={saving || !fVendor || !fAmount} style={{ flex: 2, padding: '10px 0', borderRadius: 8, border: 'none', background: 'var(--orange)', color: '#fff', fontWeight: 700, cursor: 'pointer', opacity: (!fVendor || !fAmount) ? 0.5 : 1 }}>{saving ? 'Saving…' : 'Log Expense'}</button>
-          </div>
-        </Modal>
-      )}
-
-      {/* ── Transfer Modal ── */}
-      {showTransferModal && (
-        <Modal title="Transfer from Reserve" onClose={() => setShowTransferModal(false)}>
-          <div style={{ background: 'var(--purple)11', border: '1px solid var(--purple)44', borderRadius: 8, padding: '10px 14px', marginBottom: 20, fontSize: 13 }}>
-            Reserve available: <span style={{ fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: 'var(--purple)' }}>{fmt(remaining('reserve'))}</span>
-          </div>
-          <Row label="Transfer To">
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {ACCTS.filter(a => a.key !== 'reserve').map(a => (
-                <button key={a.key} onClick={() => setTTo(a.key)} style={{ padding: '7px 14px', borderRadius: 8, border: `2px solid ${tTo === a.key ? a.color : 'var(--border)'}`, background: tTo === a.key ? a.color + '18' : 'transparent', color: tTo === a.key ? a.color : 'var(--text2)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>{a.label}</button>
-              ))}
-            </div>
-          </Row>
-          <Row label="Amount">
-            <CurrIn value={tAmt} onChange={setTAmt} />
-            {toN(tAmt) > remaining('reserve') && <div style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>Exceeds available reserve balance.</div>}
-          </Row>
-          <Row label="Note (optional)">
-            <input value={tNote} onChange={e => setTNote(e.target.value)} placeholder="Reason for transfer…" style={inp} />
-          </Row>
-          <div style={{ display: 'flex', gap: 10, marginTop: 8 }}>
-            <button onClick={() => setShowTransferModal(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-            <button onClick={submitTransfer} disabled={saving || !tAmt || toN(tAmt) <= 0 || toN(tAmt) > remaining('reserve')} style={{ flex: 2, padding: '10px 0', borderRadius: 8, border: 'none', background: 'var(--purple)', color: '#fff', fontWeight: 700, cursor: 'pointer', opacity: (!tAmt || toN(tAmt) > remaining('reserve')) ? 0.5 : 1 }}>{saving ? 'Processing…' : 'Confirm Transfer'}</button>
           </div>
         </Modal>
       )}

@@ -92,6 +92,11 @@ export default function LoginFlow() {
     finally { setLoading(false); }
   };
 
+  const pressKey = (k) => {
+    if (k === 'del') { setPin(p => p.slice(0, -1)); return; }
+    if (pin.length < 4) setPin(p => p + k);
+  };
+
   if (step === 1) return (
     <div style={S.bg}>
       <div style={S.card}>
@@ -112,6 +117,8 @@ export default function LoginFlow() {
     </div>
   );
 
+  const padKeys = ['1','2','3','4','5','6','7','8','9','','0','del'];
+
   return (
     <div style={S.bg}>
       <div style={S.card}>
@@ -122,7 +129,45 @@ export default function LoginFlow() {
         <div style={S.pinDots}>
           {[0,1,2,3].map(i => <div key={i} style={S.dot(pin.length > i)} />)}
         </div>
+
+        {/* hidden input keeps keyboard support on desktop */}
         <input ref={pinRef} style={S.pinInput} type="password" inputMode="numeric" value={pin} onKeyDown={handlePinKey} onChange={() => {}} readOnly />
+
+        {/* on-screen keypad — works on all devices including iPhone */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, margin: '4px 0 20px' }}>
+          {padKeys.map((k, i) => {
+            if (k === '') return <div key={i} />;
+            const isDel = k === 'del';
+            const disabled = !isDel && pin.length >= 4;
+            return (
+              <button
+                key={k + i}
+                onClick={() => pressKey(k)}
+                disabled={disabled}
+                style={{
+                  height: 58,
+                  borderRadius: 12,
+                  border: '1px solid var(--border)',
+                  background: isDel ? 'transparent' : 'var(--surface2)',
+                  color: isDel ? 'var(--text2)' : 'var(--text)',
+                  fontSize: isDel ? 20 : 22,
+                  fontWeight: 600,
+                  cursor: disabled ? 'default' : 'pointer',
+                  opacity: disabled ? 0.3 : 1,
+                  WebkitTapHighlightColor: 'transparent',
+                  userSelect: 'none',
+                  transition: 'background 0.1s',
+                }}
+                onMouseDown={e => { if (!isDel) e.currentTarget.style.background = 'var(--surface3)'; }}
+                onMouseUp={e => { e.currentTarget.style.background = isDel ? 'transparent' : 'var(--surface2)'; }}
+                onTouchStart={e => { if (!isDel) e.currentTarget.style.background = 'var(--surface3)'; }}
+                onTouchEnd={e => { e.currentTarget.style.background = isDel ? 'transparent' : 'var(--surface2)'; }}
+              >
+                {isDel ? '⌫' : k}
+              </button>
+            );
+          })}
+        </div>
 
         {error && <div style={S.err}>{error}</div>}
         {lockdown && countdown > 0 && (

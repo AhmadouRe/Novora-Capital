@@ -37,6 +37,8 @@ export default function RevenueDashboard({searchParams}){
   const [showSplitsModal,setShowSplitsModal]=useState(false);
   const [expandedDeal,setExpandedDeal]=useState(null);
   const [session,setSession]=useState(null);
+  const [editDealId,setEditDealId]=useState(null);
+  const [editDealData,setEditDealData]=useState({});
 
   // Log form
   const [address,setAddress]=useState('');
@@ -165,6 +167,22 @@ export default function RevenueDashboard({searchParams}){
     if(!confirm('Delete this deal?'))return;
     await fetch(`/api/revenue/deals/${id}`,{method:'DELETE'});
     setDeals(ds=>ds.filter(d=>d.id!==id));
+  }
+
+  function openEditDeal(deal){
+    setEditDealId(deal.id);
+    setEditDealData({address:deal.address||'',fee:String(deal.fee||''),source:deal.source||SOURCES[0],exitStrategy:deal.exitStrategy||EXIT_STRATS[0],county:deal.county||'',date:deal.date||deal.loggedAt?.slice(0,10)||todayISO()});
+    setExpandedDeal(deal.id);
+  }
+
+  async function saveEditDeal(){
+    const d=editDealData;
+    const res=await fetch(`/api/revenue/deals/${editDealId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({address:d.address,fee:toN(d.fee),source:d.source,exitStrategy:d.exitStrategy,county:d.county,date:d.date})});
+    if(res.ok){
+      const updated=await res.json();
+      setDeals(ds=>ds.map(d=>d.id===editDealId?updated:d));
+      setEditDealId(null);
+    }
   }
 
   async function saveGoal(){
@@ -370,10 +388,27 @@ export default function RevenueDashboard({searchParams}){
                     </div>
                     <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:900,color:feeCol}}>{fmt(feeAmt)}</span>
                     <div style={{display:'flex',gap:6}}>
+                      <button onClick={e=>{e.stopPropagation();openEditDeal(deal);}} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'var(--surface2)',color:'var(--text2)',cursor:'pointer',fontSize:12}}>✎</button>
                       <button onClick={e=>{e.stopPropagation();deleteDeal(deal.id);}} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
                     </div>
                   </div>
-                  {isExp&&(
+                  {isExp&&editDealId===deal.id&&(
+                    <div style={{padding:'16px',background:'var(--surface2)',border:'1px solid var(--border)',borderTop:'none',borderRadius:'0 0 10px 10px'}} onClick={e=>e.stopPropagation()}>
+                      <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12,marginBottom:12}}>
+                        <div style={{gridColumn:isMobile?'1':'1/-1'}}><label style={LBL}>Address</label><input style={INPUT} value={editDealData.address} onChange={e=>setEditDealData(d=>({...d,address:e.target.value}))}/></div>
+                        <div><label style={LBL}>Fee</label><div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span><input style={{...INPUT,paddingLeft:24}} type="number" value={editDealData.fee} onChange={e=>setEditDealData(d=>({...d,fee:e.target.value}))}/></div></div>
+                        <div><label style={LBL}>Source</label><select style={{...INPUT,height:48}} value={editDealData.source} onChange={e=>setEditDealData(d=>({...d,source:e.target.value}))}>{SOURCES.map(s=><option key={s} value={s}>{s}</option>)}</select></div>
+                        <div><label style={LBL}>Exit Strategy</label><select style={{...INPUT,height:48}} value={editDealData.exitStrategy} onChange={e=>setEditDealData(d=>({...d,exitStrategy:e.target.value}))}>{EXIT_STRATS.map(s=><option key={s} value={s}>{s}</option>)}</select></div>
+                        <div><label style={LBL}>County</label><input style={INPUT} value={editDealData.county} onChange={e=>setEditDealData(d=>({...d,county:e.target.value}))}/></div>
+                        <div><DatePicker label="Date" value={editDealData.date} onChange={v=>setEditDealData(d=>({...d,date:v}))}/></div>
+                      </div>
+                      <div style={{display:'flex',gap:10}}>
+                        <button onClick={()=>setEditDealId(null)} style={{flex:1,padding:'10px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text2)',fontWeight:600,cursor:'pointer'}}>Cancel</button>
+                        <button onClick={saveEditDeal} style={{flex:2,padding:'10px',borderRadius:8,border:'none',background:'var(--gold)',color:'#000',fontWeight:700,cursor:'pointer'}}>Save Changes</button>
+                      </div>
+                    </div>
+                  )}
+                  {isExp&&editDealId!==deal.id&&(
                     <div style={{padding:'14px 16px',background:'var(--surface2)',border:'1px solid var(--border)',borderTop:'none',borderRadius:'0 0 10px 10px',display:'flex',gap:8,flexWrap:'wrap'}}>
                       {splits.map(s=><div key={s.label} style={{flex:1,minWidth:80,padding:'10px',borderRadius:8,background:'var(--surface3)',textAlign:'center'}}>
                         <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:14,fontWeight:700,color:s.color||'var(--text)'}}>{fmt(Math.round(feeAmt*s.pct/100))}</div>

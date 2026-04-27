@@ -78,6 +78,7 @@ export default function OfferGenerator(){
   const [showHistory,setShowHistory]=useState(false);
   const [savedMsg,setSavedMsg]=useState('');
   const [copied,setCopied]=useState(false);
+  const [deletingHistId,setDeletingHistId]=useState(null);
 
   // Assignment
   const [address,setAddress]=useState('');
@@ -180,6 +181,20 @@ export default function OfferGenerator(){
     fetch('/api/calculator/history').then(r=>r.json()).then(d=>{if(Array.isArray(d))setHistory(d);});
   }
 
+  function loadFromHist(h){
+    setMode(h.mode||'assignment');
+    setAddress(h.address||'');
+    setArvOverride(h.arv?String(h.arv):'');
+    setShowHistory(false);
+  }
+
+  async function deleteFromHist(id){
+    setDeletingHistId(id);
+    await fetch(`/api/calculator/history/${id}`,{method:'DELETE'});
+    setHistory(hs=>hs.filter(h=>h.id!==id));
+    setDeletingHistId(null);
+  }
+
   const condBtns=[{k:'moveIn',l:'Move-In Ready',d:'Cosmetic updates only'},{k:'light',l:'Light Rehab',d:'Flooring, paint, fixtures'},{k:'medium',l:'Medium Rehab',d:'Kitchen, bath, systems'},{k:'full',l:'Full Gut',d:'Complete renovation'}];
 
   const p=isMobile?16:24;
@@ -207,6 +222,8 @@ export default function OfferGenerator(){
                 <span style={{flex:1,fontSize:14,color:'var(--text)',fontWeight:600}}>{h.address||'No address'}</span>
                 <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:13,color:'var(--gold)'}}>{fmt(h.mao)}</span>
                 <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,fontWeight:700,color:h.verdict==='STRONG'?'var(--green)':h.verdict==='VIABLE'?'var(--gold)':h.verdict==='TIGHT'?'var(--orange)':'var(--red)',background:h.verdict==='STRONG'?'var(--green-faint)':'var(--red-faint)',border:'1px solid transparent'}}>{h.verdict}</span>
+                <button onClick={()=>loadFromHist(h)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--gold-border)',background:'var(--gold-faint)',color:'var(--gold)',fontSize:12,cursor:'pointer',fontWeight:600}}>Load</button>
+                <button onClick={()=>deleteFromHist(h.id)} disabled={deletingHistId===h.id} style={{padding:'4px 8px',borderRadius:6,border:'none',background:'none',color:'var(--text3)',fontSize:14,cursor:'pointer'}}>✕</button>
               </div>
             ))}
           </div>

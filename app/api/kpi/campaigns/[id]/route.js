@@ -33,10 +33,9 @@ export async function DELETE(request, { params }) {
   const list = await getList('nc:kpi:campaigns');
   const campaign = list.find(c => c.id === params.id);
   if (!campaign) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  if (campaign.status !== 'archived') return NextResponse.json({ error: 'Can only delete archived campaigns' }, { status: 400 });
 
   const updated = list.filter(c => c.id !== params.id);
   await saveList('nc:kpi:campaigns', updated);
-  await writeAudit(session.userId, session.userName, 'novora-capital', 'CAMPAIGN_DELETED', params.id);
+  await writeAudit(session.userId, session.userName, 'novora-capital', 'CAMPAIGN_DELETED', `${campaign.name}`);
   return NextResponse.json({ success: true });
 }

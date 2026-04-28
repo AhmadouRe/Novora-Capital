@@ -127,7 +127,7 @@ function computeScore({ motivation, decisionMaker, multipleOwners, timeline, acc
   if (condition === 'moveIn' || condition === 'light') novSigs.push('Light condition — retail eligible');
   if (askN > 0 && arvN > 0 && Math.abs(askN - arvN) / arvN < 0.15) novSigs.push('Asking price within 15% of ARV');
   const isNovation = exitStrategy === 'novation';
-  const switchDetected = exitStrategy === 'assignment' && novSigs.length >= 2 && assignSigs.length === 0;
+  const switchDetected = (exitStrategy === 'assignment' || exitStrategy === 'either') && novSigs.length >= 2 && assignSigs.length === 0;
 
   // STAGE 3 — WEIGHTED SCORING
   const weights = { motivation: isNovation ? 0.30 : 0.35, economics: isNovation ? 0.40 : 0.35, logistics: 0.20, property: 0.10 };
@@ -170,7 +170,8 @@ function computeScore({ motivation, decisionMaker, multipleOwners, timeline, acc
   else if (condition === 'light') propertyScore = 75;
   else if (condition === 'medium') propertyScore = 55;
   else if (condition === 'major') propertyScore = 35;
-  if (majorIssues && majorIssues.trim().length > 0) propertyScore = Math.max(0, propertyScore - 10);
+  const majorIssuesHasRealContent = majorIssues && !/^\s*(none|no|n\/a|n-a|nil|na)\s*$/i.test(majorIssues.trim()) && majorIssues.trim().length > 0;
+  if (majorIssuesHasRealContent) propertyScore = Math.max(0, propertyScore - 10);
 
   // STAGE 4 — COMPOSITE
   const composite = Math.round(
@@ -184,6 +185,7 @@ function computeScore({ motivation, decisionMaker, multipleOwners, timeline, acc
   const cats = [motivationScore, economicsScore, logisticsScore, propertyScore];
   const catsAbove60 = cats.filter(s => s >= 60).length;
   const contradictions = [];
+  if (motivation === 'needs' && timeline === 'whenever') contradictions.push('Seller says they need to sell but timeline is "whenever" — contradiction. Clarify real urgency before proceeding.');
   if (motivationScore >= 70 && economicsScore < 30) contradictions.push('Motivated seller but price gap is large. Motivation may not be enough to bridge the numbers.');
   if (motivationScore < 30 && economicsScore >= 70) contradictions.push('Numbers work but seller motivation is weak. Risk of seller backing out before or after contract.');
   if ((timeline === 'asap' || timeline === '30d') && logisticsScore < 70) contradictions.push('Urgent timeline but access is limited. May not be able to move fast enough to close.');
@@ -270,7 +272,7 @@ export default function ScorecardPage() {
   const [userName, setUserName] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState([]);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState('idle'); // idle | copying | success | error
 
   const [streetAddr, setStreetAddr] = useState('');
   const [city, setCity] = useState('');
@@ -341,14 +343,21 @@ export default function ScorecardPage() {
   };
 
   const copyAndSave = async () => {
-    navigator.clipboard?.writeText(buildText()).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    setCopied('copying');
+    try {
+      await navigator.clipboard.writeText(buildText());
+    } catch {
+      setCopied('error');
+      setTimeout(() => setCopied('idle'), 2500);
+      return;
+    }
     if (verdict !== 'INCOMPLETE') {
       const payload = { address: [streetAddr, city, stateVal, zip].filter(Boolean).join(', '), verdict, confidence, composite, motivation, timeline, accessType, occupancy, condition, arv: toN(arv), mortgage: toN(mortgage), asking: toN(asking), mao: toN(mao), notes };
-      const res = await fetch('/api/scorecard/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (res.ok) { const d = await res.json(); setHistory(prev => [d, ...prev].slice(0, 30)); }
+      const res = await fetch('/api/scorecard/history', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).catch(()=>null);
+      if (res?.ok) { const d = await res.json(); setHistory(prev => [d, ...prev].slice(0, 100)); }
     }
+    setCopied('success');
+    setTimeout(() => setCopied('idle'), 2500);
   };
 
   const updateOutcome = async (id, outcome) => {
@@ -373,9 +382,6 @@ export default function ScorecardPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <button onClick={() => router.push('/')} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 20, cursor: 'pointer', padding: '4px 8px', borderRadius: 6 }}>←</button>
           <span style={{ fontWeight: 700, fontSize: 16 }}>Lead Scorecard</span>
-          <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 20, background: missingCount === 0 ? 'var(--green-faint)' : 'var(--gold-faint)', color: missingCount === 0 ? 'var(--green)' : 'var(--gold)', border: `1px solid ${missingCount === 0 ? 'var(--green-border)' : 'var(--gold-border)'}`, fontWeight: 700 }}>
-            {missingCount === 0 ? '✓ All required filled' : `${missingCount} fields missing`}
-          </span>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface2)', color: 'var(--text2)', fontSize: 13, cursor: 'pointer', position: 'relative' }} onClick={() => setShowHistory(!showHistory)}>
@@ -405,7 +411,7 @@ export default function ScorecardPage() {
           <TInput value={county} onChange={setCounty} placeholder="County" />
         </SCard>
 
-        <SCard title="Lead Qualification" color="var(--purple)" accent="var(--purple)" sub="Complete every field — required for recommendation">
+        <SCard title="Lead Qualification" color="var(--purple)" accent="var(--purple)" sub="Fill in as much as you know — more data produces better results">
           <div style={{ marginBottom: 18 }}>
             <Label>Motivation Level</Label>
             <Radio value={motivation} onChange={setMotivation} opts={[
@@ -504,9 +510,10 @@ export default function ScorecardPage() {
             ))}
           </div>
 
-          <button style={{ width: '100%', minHeight: 52, padding: '15px 0', borderRadius: 10, border: 'none', background: vColor, color: ['var(--cyan)', 'var(--gold)', 'var(--green)'].includes(vColor) ? '#000' : '#fff', fontWeight: 800, fontSize: 15, cursor: 'pointer', letterSpacing: '0.02em', transition: 'all 0.15s' }} onClick={copyAndSave}>
-            {copied ? '✓ Copied to Clipboard' : 'Copy Scorecard & Save to History'}
+          <button style={{ width: '100%', minHeight: 52, padding: '15px 0', borderRadius: 10, border: 'none', background: copied==='copying'?'var(--surface3)':vColor, color: ['var(--cyan)', 'var(--gold)', 'var(--green)'].includes(vColor) ? '#000' : '#fff', fontWeight: 800, fontSize: 15, cursor: copied==='copying'?'default':'pointer', letterSpacing: '0.02em', transition: 'all 0.15s', opacity: copied==='copying'?0.7:1 }} onClick={copied==='copying'?undefined:copyAndSave}>
+            {copied==='copying'?'Copying…':copied==='success'?'✓ Copied & Saved':copied==='error'?'✗ Copy Failed — try again':'Copy Scorecard & Save to History'}
           </button>
+          {verdict==='INCOMPLETE'&&<div style={{marginTop:8,fontSize:12,color:'var(--text3)',textAlign:'center'}}>Fill in motivation and timeline to enable saving to history.</div>}
         </div>
 
         {/* History */}

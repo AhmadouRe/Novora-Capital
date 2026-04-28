@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import AdminPanel from './AdminPanel.js';
 
 function fmt(n) { return Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}); }
@@ -26,6 +26,7 @@ export default function Dashboard({ session }) {
   const [isMobile, setIsMobile] = useState(false);
   const [showSessionWarning, setShowSessionWarning] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -70,7 +71,8 @@ export default function Dashboard({ session }) {
   const goal = goalData?.amount || 50000;
   const goalPct = pct(totalRevenue, goal);
   const remaining = Math.max(0, goal - totalRevenue);
-  const dealsNeeded = Math.ceil(remaining / 9000);
+  const avgDeal = goalData?.avgDeal > 0 ? Number(goalData.avgDeal) : 9000;
+  const dealsNeeded = Math.ceil(Math.max(0, remaining) / avgDeal);
 
   const now = new Date();
   const endDate = goalData?.endDate ? new Date(goalData.endDate) : new Date('2026-07-25');
@@ -80,10 +82,10 @@ export default function Dashboard({ session }) {
   const hour = now.getHours();
   const greeting = hour<12?'Good morning':hour<17?'Good afternoon':'Good evening';
   const todayStr = now.toISOString().slice(0,10);
-  const todayKpi = [
-    ...wclEntries.filter(e=>e.date===todayStr),
-    ...smsEntries.filter(e=>e.date===todayStr),
-  ].length;
+  const todayWCL = wclEntries.find(e=>e.date===todayStr);
+  const todayQualified = Number(todayWCL?.qualified ?? todayWCL?.conversations ?? 0);
+  const todayOffers = Number(todayWCL?.offersMade ?? 0);
+  const todayReceived = Number(todayWCL?.received ?? 0);
 
   const p = isMobile ? 16 : 24;
   const navH = 58;
@@ -142,11 +144,17 @@ export default function Dashboard({ session }) {
             <div style={{display:'flex',gap:isMobile?16:24,flexShrink:0}}>
               <div style={{textAlign:'right'}}>
                 <div style={{fontSize:isMobile?36:56,fontWeight:900,fontFamily:'JetBrains Mono,monospace',color:daysColor,lineHeight:1}}>{daysLeft}</div>
-                <div style={{fontSize:isMobile?10:13,color:'var(--text3)',marginTop:3}}>days to July 25</div>
+                <div style={{fontSize:isMobile?10:13,color:'var(--text3)',marginTop:3}}>days to {endDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</div>
               </div>
-              <div style={{textAlign:'right'}}>
-                <div style={{fontSize:isMobile?36:56,fontWeight:900,fontFamily:'JetBrains Mono,monospace',color:'var(--cyan)',lineHeight:1}}>{todayKpi}</div>
-                <div style={{fontSize:isMobile?10:13,color:'var(--text3)',marginTop:3}}>KPI today</div>
+              <div style={{display:'flex',gap:isMobile?10:14,flexShrink:0}}>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:isMobile?28:40,fontWeight:900,fontFamily:'JetBrains Mono,monospace',color:'var(--gold)',lineHeight:1}}>{todayQualified}</div>
+                  <div style={{fontSize:isMobile?10:12,color:'var(--text3)',marginTop:3}}>Qualified</div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:isMobile?28:40,fontWeight:900,fontFamily:'JetBrains Mono,monospace',color:'var(--cyan)',lineHeight:1}}>{todayOffers}</div>
+                  <div style={{fontSize:isMobile?10:12,color:'var(--text3)',marginTop:3}}>Offers</div>
+                </div>
               </div>
             </div>
           </div>
@@ -162,42 +170,49 @@ export default function Dashboard({ session }) {
           </div>
           <div style={{display:'flex',justifyContent:'space-between',fontSize:13}}>
             <span style={{color:'var(--text3)'}}>{goalPct}% complete</span>
-            <span style={{color:'var(--text3)'}}>{todayKpi} KPI entries today</span>
+            <span style={{color:'var(--text3)'}}>Today: {todayReceived} leads · {todayQualified} qualified · {todayOffers} offers</span>
           </div>
         </div>
 
+        {/* Today's Activity Strip */}
+        {session.access?.kpi !== false && (
+          <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12,padding:'14px 18px',marginBottom:isMobile?12:16,display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+            <span style={{fontSize:11,textTransform:'uppercase',letterSpacing:'0.08em',fontWeight:700,color:'var(--text3)',flexShrink:0}}>Today</span>
+            <div style={{display:'flex',gap:isMobile?14:20,flex:1,flexWrap:'wrap'}}>
+              {[{l:'Leads',v:todayReceived,c:'var(--text2)'},{l:'Qualified',v:todayQualified,c:'var(--gold)'},{l:'Offers',v:todayOffers,c:'var(--cyan)'}].map(({l,v,c})=>(
+                <div key={l} style={{display:'flex',alignItems:'baseline',gap:6}}>
+                  <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:800,color:c}}>{v}</span>
+                  <span style={{fontSize:12,color:'var(--text3)'}}>{l}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={()=>router.push('/kpi?openForm=true')} style={{padding:'7px 16px',borderRadius:8,border:'none',background:'var(--gold)',color:'#000',fontWeight:800,fontSize:13,cursor:'pointer',flexShrink:0}}>
+              Log Today
+            </button>
+          </div>
+        )}
+
         {/* Tool Grid */}
         <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:isMobile?10:14,marginBottom:isMobile?12:16}}>
-          {TOOLS.map(tool => {
-            const locked = tool.accessKey && !session.access?.[tool.accessKey];
-            return (
-              <div key={tool.href}
-                style={{gridColumn:tool.fullWidth&&!isMobile?'1/-1':'auto'}}
-                onClick={()=>{
-                  if (locked) { setLockedMsg(tool.href); setTimeout(()=>setLockedMsg(null),3000); return; }
-                  router.push(tool.href);
-                }}>
-                <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',display:'flex',alignItems:'center',gap:20,cursor:locked?'default':'pointer',opacity:locked?0.55:1,transition:'all 0.18s'}}
-                  onMouseEnter={e=>{if(!locked){e.currentTarget.style.borderColor=tool.color+'80';e.currentTarget.style.background=tool.color+'0a';}}}
-                  onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.background='var(--surface)';}}>
-                  <div style={{width:48,height:48,borderRadius:13,background:locked?'var(--surface3)':tool.color+'26',border:`1px solid ${locked?'var(--border)':tool.color+'40'}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,color:locked?'var(--text3)':tool.color,flexShrink:0}}>
-                    {locked?'🔒':tool.icon}
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:locked?'var(--text3)':tool.color,marginBottom:4}}>{tool.tag}{locked?' · 🔒':''}</div>
-                    <div style={{fontSize:16,fontWeight:800,color:locked?'var(--text3)':'var(--text)',marginBottom:4}}>{tool.label}</div>
-                    <div style={{fontSize:13,color:'var(--text2)',lineHeight:1.5}}>{locked?'Contact Ahmadou for access':tool.desc}</div>
-                  </div>
-                  {!locked && <div style={{color:tool.color,fontSize:18,flexShrink:0}}>→</div>}
+          {TOOLS.filter(tool => !tool.accessKey || session.access?.[tool.accessKey]).map(tool => (
+            <div key={tool.href}
+              style={{gridColumn:tool.fullWidth&&!isMobile?'1/-1':'auto'}}
+              onClick={()=>router.push(tool.href)}>
+              <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',display:'flex',alignItems:'center',gap:20,cursor:'pointer',transition:'all 0.18s'}}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=tool.color+'80';e.currentTarget.style.background=tool.color+'0a';}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border)';e.currentTarget.style.background='var(--surface)';}}>
+                <div style={{width:48,height:48,borderRadius:13,background:tool.color+'26',border:`1px solid ${tool.color+'40'}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,color:tool.color,flexShrink:0}}>
+                  {tool.icon}
                 </div>
-                {lockedMsg===tool.href && (
-                  <div style={{marginTop:8,padding:'10px 16px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text3)',fontSize:13}}>
-                    Contact Ahmadou for access to {tool.label}.
-                  </div>
-                )}
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:10,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:tool.color,marginBottom:4}}>{tool.tag}</div>
+                  <div style={{fontSize:16,fontWeight:800,color:'var(--text)',marginBottom:4}}>{tool.label}</div>
+                  <div style={{fontSize:13,color:'var(--text2)',lineHeight:1.5}}>{tool.desc}</div>
+                </div>
+                <div style={{color:tool.color,fontSize:18,flexShrink:0}}>→</div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
 
         {/* Team Strip */}
@@ -227,13 +242,18 @@ export default function Dashboard({ session }) {
             {href:'/calculator',icon:'◈',label:'Offers'},
             {href:'/kpi',icon:'◉',label:'KPI'},
             {href:'/revenue',icon:'◆',label:'Revenue'},
-            {href:'/scorecard',icon:'◐',label:'Score'},
-          ].map(item=>(
-            <div key={item.href} onClick={()=>router.push(item.href)} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,cursor:'pointer',color:item.href==='/'?'var(--gold)':'var(--text3)',transition:'color 0.15s'}}>
-              <span style={{fontSize:18}}>{item.icon}</span>
-              <span style={{fontSize:10,fontWeight:600}}>{item.label}</span>
-            </div>
-          ))}
+            session.access?.manageTeam
+              ? {href:'/__admin',icon:'⚙',label:'Admin',onClick:()=>setShowAdmin(true)}
+              : {href:'/scorecard',icon:'◐',label:'Score'},
+          ].map(item=>{
+            const isActive = item.href==='/' ? pathname==='/' : pathname?.startsWith(item.href);
+            return (
+              <div key={item.href} onClick={item.onClick||(()=>router.push(item.href))} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,cursor:'pointer',color:isActive?'var(--gold)':'var(--text3)',transition:'color 0.15s'}}>
+                <span style={{fontSize:18}}>{item.icon}</span>
+                <span style={{fontSize:10,fontWeight:600}}>{item.label}</span>
+              </div>
+            );
+          })}
         </nav>
       )}
 

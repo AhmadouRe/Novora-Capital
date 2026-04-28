@@ -52,10 +52,10 @@ function CompSlot({num,comp,subjectSqft,onChange,accentColor}){
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:10}}>
         <div><label style={LBL}>Sale Price</label>
           <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none'}}>$</span>
-          <input style={{...INPUT,paddingLeft:24}} type="number" value={comp.price||''} onChange={e=>onChange({...comp,price:e.target.value})} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'} placeholder=""/></div>
+          <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" pattern="[0-9]*" value={comp.price||''} onChange={e=>onChange({...comp,price:e.target.value.replace(/[^0-9.]/g,'')})} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'} placeholder=""/></div>
         </div>
         <div><label style={LBL}>Sqft</label>
-          <input style={INPUT} type="number" value={comp.sqft||''} onChange={e=>onChange({...comp,sqft:e.target.value})} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'} placeholder=""/>
+          <input style={INPUT} type="text" inputMode="numeric" pattern="[0-9]*" value={comp.sqft||''} onChange={e=>onChange({...comp,sqft:e.target.value.replace(/[^0-9]/g,'')})} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'} placeholder=""/>
         </div>
         <div><DatePicker label="Date Sold" value={comp.date||''} onChange={v=>onChange({...comp,date:v})}/></div>
       </div>
@@ -93,6 +93,7 @@ export default function OfferGenerator(){
 
   // Novation
   const [novComps,setNovComps]=useState([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);
+  const [novSubjectSqft,setNovSubjectSqft]=useState('');
   const [novFee,setNovFee]=useState('20000');
   const [novCushion,setNovCushion]=useState('7500');
   const [novBuffer,setNovBuffer]=useState('3');
@@ -140,8 +141,10 @@ export default function OfferGenerator(){
   }
 
   // Novation
-  const novValid=novComps.filter(c=>{const d=daysDiff(c.date);return toN(c.price)>0&&(d===null||d<=365);});
-  const suggestedALP=novValid.length>0?Math.round(novValid.reduce((s,c)=>s+toN(c.price),0)/novValid.length):0;
+  const novSqftN=toN(novSubjectSqft);
+  const novValid=novComps.filter(c=>{const d=daysDiff(c.date);return toN(c.price)>0&&toN(c.sqft)>0&&(d===null||d<=365);});
+  const avgNovPPSF=novValid.length>0?novValid.reduce((s,c)=>s+toN(c.price)/toN(c.sqft),0)/novValid.length:0;
+  const suggestedALP=novSqftN>0&&avgNovPPSF>0?Math.round(avgNovPPSF*novSqftN):0;
   const isALPOverridden=toN(alpOverride)>0;
   const activeALP=isALPOverridden?toN(alpOverride):suggestedALP;
   const alp=activeALP;
@@ -176,7 +179,15 @@ export default function OfferGenerator(){
 
   async function copyBrief(){
     await navigator.clipboard.writeText(mode==='novation'?buildNovBrief():buildBrief());
-    setCopied(true);setTimeout(()=>setCopied(false),2500);
+    const shouldSave = mode==='novation'?(novV==='STRONG'||novV==='VIABLE'):(vWord==='STRONG'||vWord==='VIABLE');
+    if(shouldSave){
+      await fetch('/api/calculator/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address,arv:finalArv,mao,verdict:mode==='novation'?novV:vWord,confidence:conf,mode,date:todayISO()})});
+      fetch('/api/calculator/history').then(r=>r.json()).then(d=>{if(Array.isArray(d))setHistory(d);});
+      setCopied('saved');
+    } else {
+      setCopied(true);
+    }
+    setTimeout(()=>setCopied(false),2500);
   }
 
   async function saveHist(){
@@ -189,6 +200,14 @@ export default function OfferGenerator(){
     setMode(h.mode||'assignment');
     setAddress(h.address||'');
     setArvOverride(h.arv?String(h.arv):'');
+    if(h.sqft) setSqft(String(h.sqft));
+    if(h.condition) setCondition(h.condition);
+    if(h.majors) setMajors(h.majors);
+    if(h.aFee) setAFee(String(h.aFee));
+    if(h.cushion) setCushion(String(h.cushion));
+    if(h.alpOverride) setAlpOverride(String(h.alpOverride));
+    if(Array.isArray(h.comps)) setComps(h.comps.length===4?h.comps:[...h.comps,...Array(4-h.comps.length).fill(EMPTY_COMP)]);
+    if(Array.isArray(h.novComps)) setNovComps(h.novComps.length===4?h.novComps:[...h.novComps,...Array(4-h.novComps.length).fill(EMPTY_COMP)]);
     setShowHistory(false);
   }
 
@@ -225,7 +244,7 @@ export default function OfferGenerator(){
                 <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)'}}>{h.date}</span>
                 <span style={{flex:1,fontSize:14,color:'var(--text)',fontWeight:600}}>{h.address||'No address'}</span>
                 <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:13,color:'var(--gold)'}}>{fmt(h.mao)}</span>
-                <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,fontWeight:700,color:h.verdict==='STRONG'?'var(--green)':h.verdict==='VIABLE'?'var(--gold)':h.verdict==='TIGHT'?'var(--orange)':'var(--red)',background:h.verdict==='STRONG'?'var(--green-faint)':'var(--red-faint)',border:'1px solid transparent'}}>{h.verdict}</span>
+                <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,fontWeight:700,color:h.verdict==='STRONG'?'var(--green)':h.verdict==='VIABLE'?'var(--gold)':h.verdict==='TIGHT'?'var(--orange)':'var(--red)',background:h.verdict==='STRONG'?'var(--green-faint)':h.verdict==='VIABLE'?'var(--gold-faint)':h.verdict==='TIGHT'?'var(--orange-faint)':'var(--red-faint)',border:`1px solid ${h.verdict==='STRONG'?'var(--green-border)':h.verdict==='VIABLE'?'var(--gold-border)':h.verdict==='TIGHT'?'var(--orange-border)':'var(--red-border)'}`}}>{h.verdict}</span>
                 <button onClick={()=>loadFromHist(h)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--gold-border)',background:'var(--gold-faint)',color:'var(--gold)',fontSize:12,cursor:'pointer',fontWeight:600}}>Load</button>
                 <button onClick={()=>deleteFromHist(h.id)} disabled={deletingHistId===h.id} style={{padding:'4px 8px',borderRadius:6,border:'none',background:'none',color:'var(--text3)',fontSize:14,cursor:'pointer'}}>✕</button>
               </div>
@@ -250,7 +269,7 @@ export default function OfferGenerator(){
             <span style={{color:'var(--text)',fontSize:14}}>Switch to {switchConfirm}? Current inputs will be cleared.</span>
             <div style={{display:'flex',gap:8}}>
               <button onClick={()=>setSwitchConfirm(null)} style={{padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:13}}>Cancel</button>
-              <button onClick={()=>{setMode(switchConfirm);setSwitchConfirm(null);setComps([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);setAddress('');setSqft('');setAsking('');setArvOverride('');setCondition(null);setMajors({});}} style={{padding:'8px 16px',borderRadius:8,border:'none',background:'var(--gold)',color:'#000',fontWeight:700,cursor:'pointer',fontSize:13}}>Switch</button>
+              <button onClick={()=>{setMode(switchConfirm);setSwitchConfirm(null);setComps([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);setNovComps([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);setAsking('');setArvOverride('');setCondition(null);setMajors({});}} style={{padding:'8px 16px',borderRadius:8,border:'none',background:'var(--gold)',color:'#000',fontWeight:700,cursor:'pointer',fontSize:13}}>Switch</button>
             </div>
           </div>
         )}
@@ -269,13 +288,13 @@ export default function OfferGenerator(){
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 <div>
                   <label style={{...LBL,display:'flex',alignItems:'center',gap:4}}>Square Footage <span style={{color:'var(--red)'}}>*</span></label>
-                  <input style={{...INPUT,fontFamily:'JetBrains Mono,monospace',fontSize:18}} type="number" value={sqft} onChange={e=>setSqft(e.target.value)} placeholder="Enter sqft" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/>
+                  <input style={{...INPUT,fontFamily:'JetBrains Mono,monospace',fontSize:18}} type="text" inputMode="numeric" value={sqft} onChange={e=>setSqft(e.target.value.replace(/[^0-9]/g,''))} placeholder="Enter sqft" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/>
                   {sqftN>0&&<div style={{marginTop:6,fontSize:12,color:'var(--text3)'}}>Rehab brackets calculated for {fmtN(sqftN)} sqft</div>}
                 </div>
                 <div>
                   <label style={LBL}>Seller Asking Price (optional)</label>
                   <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
-                  <input style={{...INPUT,paddingLeft:24}} type="number" value={asking} onChange={e=>setAsking(e.target.value)} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" value={asking} onChange={e=>setAsking(e.target.value.replace(/[^0-9]/g,''))} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
                 </div>
               </div>
             </div>
@@ -296,7 +315,7 @@ export default function OfferGenerator(){
                 <div>
                   <label style={LBL}>Override ARV (optional)</label>
                   <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
-                  <input style={{...INPUT,paddingLeft:24}} type="number" value={arvOverride} onChange={e=>setArvOverride(e.target.value)} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" value={arvOverride} onChange={e=>setArvOverride(e.target.value.replace(/[^0-9]/g,''))} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
                   {usingOverride&&<div style={{marginTop:6,display:'flex',gap:8,alignItems:'center'}}>
                     <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--orange-faint)',color:'var(--orange)',border:'1px solid var(--orange-border)',fontWeight:700}}>MANUAL OVERRIDE</span>
                     <span style={{fontSize:12,color:'var(--text3)'}}>Suggested was {fmt(suggestedArv)}</span>
@@ -324,12 +343,14 @@ export default function OfferGenerator(){
               </div>
               {rb.ranges&&<div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>Enter sqft above for exact amounts.</div>}
               <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)',marginBottom:10}}>Major Items — tap to add</div>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:16}}>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
                 {MAJOR_ITEMS.map(m=>{const on=majors[m.id];const amt=m.dynamic?roofAmt(sqftN):m.amount||0;return(
                   <div key={m.id} onClick={()=>setMajors(x=>({...x,[m.id]:!x[m.id]}))} style={{padding:'10px 16px',borderRadius:8,border:`1px solid ${on?'var(--gold-border)':'var(--border)'}`,background:on?'var(--gold-faint)':'var(--surface3)',color:on?'var(--gold)':'var(--text2)',cursor:'pointer',fontSize:14,fontWeight:600,transition:'all 0.15s'}}>
                     {m.label}{on?` (+${fmt(amt)})`:''}</div>
                 );})}
               </div>
+              {Object.values(majors).every(v=>!v)&&<div style={{fontSize:12,color:'var(--text3)',marginBottom:16}}>None selected</div>}
+              {!Object.values(majors).every(v=>!v)&&<div style={{marginBottom:16}}/>}
               {majors.foundation&&<div style={{padding:'10px 14px',borderRadius:8,background:'var(--orange-faint)',border:'1px solid var(--orange-border)',color:'var(--orange)',fontSize:13,marginBottom:12}}>⚠ Foundation work detected — verify scope with contractor before finalizing offer</div>}
               <div style={{fontSize:13,color:'var(--text2)'}}>Total Rehab: <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--gold)'}}>{fmt(totalRehab)}</span></div>
             </div>
@@ -339,11 +360,11 @@ export default function OfferGenerator(){
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                 <div><label style={LBL}>Assignment Fee</label>
                   <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
-                  <input style={{...INPUT,paddingLeft:24}} type="number" value={aFee} onChange={e=>setAFee(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" value={aFee} onChange={e=>setAFee(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
                 </div>
                 <div><label style={LBL}>Safety Cushion</label>
                   <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
-                  <input style={{...INPUT,paddingLeft:24}} type="number" value={cushion} onChange={e=>setCushion(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" value={cushion} onChange={e=>setCushion(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
                 </div>
               </div>
             </div>
@@ -408,7 +429,7 @@ export default function OfferGenerator(){
                 )}
 
                 <button onClick={copyBrief} style={{width:'100%',minHeight:52,borderRadius:10,border:'none',background:vCol,color:'#000',fontWeight:800,fontSize:15,cursor:'pointer',marginBottom:10,transition:'all 0.15s'}}>
-                  {copied?'✓ Copied to Clipboard':'Copy Deal Brief'}
+                  {copied==='saved'?'✓ Copied & Saved':copied?'✓ Copied to Clipboard':'Copy Deal Brief'}
                 </button>
                 {(vWord==='STRONG'||vWord==='VIABLE')&&(
                   <button onClick={saveHist} style={{width:'100%',minHeight:46,borderRadius:10,border:'1px solid var(--border)',background:'var(--surface3)',color:'var(--text2)',fontWeight:700,fontSize:14,cursor:'pointer'}}>
@@ -426,10 +447,15 @@ export default function OfferGenerator(){
             <div style={CARD_C}>
               <div style={SEC}>As-Is Comparable Sales</div>
               <div style={{fontSize:13,color:'var(--text3)',marginBottom:14}}>What similar as-is condition homes are selling for. NOT repaired retail comps.</div>
-              {novComps.map((c,i)=><CompSlot key={i} num={i+1} comp={c} subjectSqft={0} onChange={v=>setNovComps(cs=>cs.map((x,j)=>j===i?v:x))} accentColor="var(--cyan)"/>)}
+              <div style={{marginBottom:14}}>
+                <label style={LBL}>Subject Property Sqft</label>
+                <input style={{...INPUT,maxWidth:180,fontFamily:'JetBrains Mono,monospace',fontSize:18}} type="text" inputMode="numeric" value={novSubjectSqft} onChange={e=>setNovSubjectSqft(e.target.value.replace(/[^0-9]/g,''))} placeholder="Enter sqft" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/>
+                {novSqftN>0&&<div style={{marginTop:6,fontSize:12,color:'var(--text3)'}}>ALP calculated via PPSF × {novSqftN.toLocaleString()} sqft</div>}
+              </div>
+              {novComps.map((c,i)=><CompSlot key={i} num={i+1} comp={c} subjectSqft={novSqftN} onChange={v=>setNovComps(cs=>cs.map((x,j)=>j===i?v:x))} accentColor="var(--cyan)"/>)}
               {suggestedALP>0&&(
                 <div style={{marginTop:14,padding:'14px 16px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)'}}>
-                  <div style={{fontSize:12,color:'var(--text3)',marginBottom:4}}>Suggested ALP (avg of valid comps)</div>
+                  <div style={{fontSize:12,color:'var(--text3)',marginBottom:4}}>Suggested ALP (avg PPSF ${Math.round(avgNovPPSF).toLocaleString()}/sqft × {novSqftN.toLocaleString()} sqft)</div>
                   <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:28,fontWeight:700,color:isALPOverridden?'var(--text3)':'var(--cyan)',textDecoration:isALPOverridden?'line-through':'none'}}>{fmt(suggestedALP)}</div>
                   {isALPOverridden&&<div style={{fontSize:12,color:'var(--text3)',marginTop:4}}>Overridden by manual input below</div>}
                 </div>
@@ -477,20 +503,20 @@ export default function OfferGenerator(){
               <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:12,marginBottom:14}}>
                 <div><label style={LBL}>Novation Fee</label>
                   <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
-                  <input style={{...INPUT,paddingLeft:24}} type="number" value={novFee} onChange={e=>setNovFee(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" value={novFee} onChange={e=>setNovFee(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
                   {elp>0&&<div style={{marginTop:6,fontSize:12,color:Number(feePctElp)>15?'var(--orange)':'var(--text3)'}}>Fee is {feePctElp}% of ELP{Number(feePctElp)>15?' — verify margin':''}</div>}
                 </div>
                 <div><label style={LBL}>Safety Cushion</label>
                   <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
-                  <input style={{...INPUT,paddingLeft:24}} type="number" value={novCushion} onChange={e=>setNovCushion(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                  <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" value={novCushion} onChange={e=>setNovCushion(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
                 </div>
                 <div><label style={LBL}>Variance Buffer %</label>
-                  <input style={{...INPUT,fontFamily:'JetBrains Mono,monospace'}} type="number" value={novBuffer} onChange={e=>setNovBuffer(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/>
+                  <input style={{...INPUT,fontFamily:'JetBrains Mono,monospace'}} type="text" inputMode="numeric" value={novBuffer} onChange={e=>setNovBuffer(e.target.value.replace(/[^0-9.]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/>
                 </div>
               </div>
               <div><label style={LBL}>Seller Asking Price (optional)</label>
                 <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
-                <input style={{...INPUT,paddingLeft:24}} type="number" value={novAsking} onChange={e=>setNovAsking(e.target.value)} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
+                <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" value={novAsking} onChange={e=>setNovAsking(e.target.value.replace(/[^0-9]/g,''))} placeholder="" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
               </div>
             </div>
 
@@ -523,7 +549,7 @@ export default function OfferGenerator(){
                   </div>
                 )}
                 <button onClick={copyBrief} style={{width:'100%',minHeight:52,borderRadius:10,border:'none',background:novVC||'var(--cyan)',color:'#000',fontWeight:800,fontSize:15,cursor:'pointer',transition:'all 0.15s'}}>
-                  {copied?'✓ Copied to Clipboard':'Copy Deal Brief'}
+                  {copied==='saved'?'✓ Copied & Saved':copied?'✓ Copied to Clipboard':'Copy Deal Brief'}
                 </button>
               </>
             )}

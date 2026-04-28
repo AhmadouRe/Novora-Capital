@@ -27,6 +27,11 @@ export default function AdminPanel({ session, onClose }) {
   const [splits, setSplits] = useState(DEFAULT_SPLITS);
   const [goalForm, setGoalForm] = useState({ amount:'', startDate:'', endDate:'', avgDeal:'' });
   const [msg, setMsg] = useState('');
+  const [auditPage, setAuditPage] = useState(50);
+  const [splitPinVal, setSplitPinVal] = useState('');
+  const [showSplitPin, setShowSplitPin] = useState(false);
+  const [splitPinErr, setSplitPinErr] = useState('');
+  const [confirmRestoreId, setConfirmRestoreId] = useState(null);
 
   const [newName, setNewName] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -88,6 +93,9 @@ export default function AdminPanel({ session, onClose }) {
   async function saveSplits() {
     const total = splits.reduce((s,x)=>s+Number(x.pct),0);
     if (Math.abs(total-100)>0.01) return flash(`Total is ${total}% — must be exactly 100%.`);
+    if (!showSplitPin) { setShowSplitPin(true); setSplitPinVal(''); setSplitPinErr(''); return; }
+    if (splitPinVal !== '2608') { setSplitPinErr('Incorrect PIN'); setSplitPinVal(''); return; }
+    setShowSplitPin(false); setSplitPinVal(''); setSplitPinErr('');
     const res = await fetch('/api/revenue/splits', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(splits) });
     if (res.ok) flash('Splits saved!'); else flash('Failed to save splits.');
   }
@@ -156,8 +164,8 @@ export default function AdminPanel({ session, onClose }) {
             <div style={{display:'flex',flexDirection:'column',gap:16}}>
               <div><label style={LBL}>Name</label><input style={INPUT} value={newName} onChange={e=>setNewName(e.target.value)} placeholder="Full name"/></div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                <div><label style={LBL}>PIN (4 digits)</label><input style={INPUT} type="password" maxLength={4} value={newPin} onChange={e=>setNewPin(e.target.value)} placeholder="••••"/></div>
-                <div><label style={LBL}>Confirm PIN</label><input style={INPUT} type="password" maxLength={4} value={newPin2} onChange={e=>setNewPin2(e.target.value)} placeholder="••••"/></div>
+                <div><label style={LBL}>PIN (4 digits)</label><input style={INPUT} type="text" inputMode="numeric" maxLength={4} value={newPin} onChange={e=>setNewPin(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="4-digit PIN"/></div>
+                <div><label style={LBL}>Confirm PIN</label><input style={INPUT} type="text" inputMode="numeric" maxLength={4} value={newPin2} onChange={e=>setNewPin2(e.target.value.replace(/\D/g,'').slice(0,4))} placeholder="Confirm PIN"/></div>
               </div>
               <div>
                 <label style={LBL}>Color</label>
@@ -192,7 +200,7 @@ export default function AdminPanel({ session, onClose }) {
                     <span style={{fontWeight:700,color:'var(--text)'}}>{u.name}</span>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                    {[{key:'revenue',label:'Can view Revenue'},{key:'expenses',label:'Can view Expenses'},{key:'manageTeam',label:'Can manage team'}].map(({key,label})=>(
+                    {[{key:'kpi',label:'Can access KPI Tracker'},{key:'revenue',label:'Can view Revenue'},{key:'expenses',label:'Can view Expenses'},{key:'manageTeam',label:'Can manage team'}].map(({key,label})=>(
                       <div key={key} style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                         <span style={{fontSize:14,color:'var(--text2)'}}>{label}</span>
                         <div onClick={()=>saveAccess(u.id,key,!u.access?.[key])} style={{width:44,height:24,borderRadius:12,background:u.access?.[key]?'var(--green)':'var(--surface3)',border:`1px solid ${u.access?.[key]?'var(--green-border)':'var(--border)'}`,position:'relative',cursor:'pointer',transition:'all 0.2s'}}>
@@ -238,9 +246,18 @@ export default function AdminPanel({ session, onClose }) {
               <div style={{padding:'10px 14px',borderRadius:10,background:Math.abs(splitsTotal-100)>0.01?'var(--red-faint)':'var(--green-faint)',border:`1px solid ${Math.abs(splitsTotal-100)>0.01?'var(--red-border)':'var(--green-border)'}`,color:Math.abs(splitsTotal-100)>0.01?'var(--red)':'var(--green)',fontSize:14,fontWeight:700}}>
                 Total: {splitsTotal}% {Math.abs(splitsTotal-100)>0.01?'— must equal 100%':'✓'}
               </div>
+              {showSplitPin && (
+                <div style={{padding:'14px 16px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--gold-border)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                  <span style={{fontSize:13,color:'var(--text2)',flex:1}}>Enter admin PIN to save splits:</span>
+                  <input type="text" inputMode="numeric" maxLength={4} value={splitPinVal} onChange={e=>setSplitPinVal(e.target.value.replace(/\D/g,'').slice(0,4))} onKeyDown={e=>{if(e.key==='Enter')saveSplits();if(e.key==='Escape'){setShowSplitPin(false);setSplitPinVal('');setSplitPinErr('');}}} placeholder="PIN" style={{width:90,height:40,textAlign:'center',letterSpacing:'0.3em',fontFamily:'JetBrains Mono,monospace',fontSize:16,fontWeight:700,borderRadius:7,background:'var(--surface3)',border:`1px solid ${splitPinErr?'var(--red)':'var(--gold-border)'}`,color:'var(--text)',outline:'none'}} autoFocus/>
+                  {splitPinErr&&<span style={{fontSize:12,color:'var(--red)'}}>{splitPinErr}</span>}
+                  <button onClick={saveSplits} style={{...BTN_PRIMARY,minHeight:40,padding:'0 16px'}}>Confirm</button>
+                  <button onClick={()=>{setShowSplitPin(false);setSplitPinVal('');setSplitPinErr('');}} style={{...BTN_SECONDARY,minHeight:40,padding:'0 12px'}}>Cancel</button>
+                </div>
+              )}
               <div style={{display:'flex',gap:10}}>
                 <button onClick={()=>setSplits(DEFAULT_SPLITS)} style={{...BTN_SECONDARY,flex:1}}>Reset to Defaults</button>
-                <button onClick={saveSplits} style={{...BTN_PRIMARY,flex:1}}>Save Splits</button>
+                <button onClick={saveSplits} style={{...BTN_PRIMARY,flex:1}}>{showSplitPin?'Enter PIN Above':'Save Splits'}</button>
               </div>
             </div>
           )}
@@ -249,13 +266,22 @@ export default function AdminPanel({ session, onClose }) {
             <div style={{display:'flex',flexDirection:'column',gap:10}}>
               {deleted.length===0&&<p style={{color:'var(--text3)',fontSize:14}}>No deleted items in the past 30 days.</p>}
               {deleted.map(item=>(
-                <div key={item.id} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)'}}>
-                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text3)',border:'1px solid var(--border)',whiteSpace:'nowrap'}}>{item.type||'ENTRY'}</span>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:14,color:'var(--text)',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.address||item.vendor||item.name||item.id}</div>
-                    <div style={{fontSize:12,color:'var(--text3)',fontFamily:'JetBrains Mono,monospace'}}>{item.deletedAt?.slice(0,10)}</div>
+                <div key={item.id} style={{background:'var(--surface2)',border:'1px solid var(--border)',borderRadius:10,overflow:'hidden'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px'}}>
+                    <span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text3)',border:'1px solid var(--border)',whiteSpace:'nowrap'}}>{item.type||'ENTRY'}</span>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:14,color:'var(--text)',fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{item.address||item.vendor||item.name||item.id}</div>
+                      <div style={{fontSize:12,color:'var(--text3)',fontFamily:'JetBrains Mono,monospace'}}>{item.deletedAt?.slice(0,10)}</div>
+                    </div>
+                    <button onClick={()=>setConfirmRestoreId(confirmRestoreId===item.id?null:item.id)} style={{...BTN_SECONDARY,minHeight:36,fontSize:12,padding:'0 12px'}}>Restore</button>
                   </div>
-                  <button onClick={()=>restore(item.id,item.type)} style={{...BTN_SECONDARY,minHeight:36,fontSize:12,padding:'0 12px'}}>Restore</button>
+                  {confirmRestoreId===item.id&&(
+                    <div style={{padding:'10px 14px',borderTop:'1px solid var(--border)',background:'var(--surface3)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                      <span style={{fontSize:13,color:'var(--text2)',flex:1}}>Restore this entry?</span>
+                      <button onClick={()=>{restore(item.id,item.type);setConfirmRestoreId(null);}} style={{...BTN_PRIMARY,minHeight:36,padding:'0 16px',fontSize:13}}>Confirm</button>
+                      <button onClick={()=>setConfirmRestoreId(null)} style={{...BTN_SECONDARY,minHeight:36,padding:'0 12px',fontSize:13}}>Cancel</button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -263,13 +289,17 @@ export default function AdminPanel({ session, onClose }) {
 
           {tab==='Audit Log' && (
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
-              {audit.slice(0,100).map((a,i)=>(
+              <div style={{fontSize:12,color:'var(--text3)',marginBottom:4}}>Showing {Math.min(auditPage,audit.length)} of {audit.length}</div>
+              {audit.slice(0,auditPage).map((a,i)=>(
                 <div key={i} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px',borderRadius:8,background:'var(--surface2)'}}>
                   <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:11,color:'var(--text3)',flexShrink:0,marginTop:2}}>{a.timestamp?.slice(0,16).replace('T',' ')}</span>
                   <div style={{width:24,height:24,borderRadius:'50%',background:'var(--gold-faint)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'var(--gold)',flexShrink:0}}>{a.userName?.[0]?.toUpperCase()}</div>
                   <div style={{flex:1}}><span style={{fontSize:11,padding:'1px 6px',borderRadius:4,background:'var(--surface3)',color:'var(--text2)',border:'1px solid var(--border)',marginRight:6}}>{a.action}</span><span style={{fontSize:13,color:'var(--text2)'}}>{a.detail}</span></div>
                 </div>
               ))}
+              {audit.length>auditPage&&(
+                <button onClick={()=>setAuditPage(p=>p+50)} style={{...BTN_SECONDARY,alignSelf:'center',marginTop:8}}>Load More</button>
+              )}
             </div>
           )}
 

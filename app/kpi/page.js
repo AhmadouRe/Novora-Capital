@@ -59,6 +59,47 @@ function RateIndicator({rate,low,high}){
   </div>;
 }
 
+function EntryLog({wclEntries,editEntry,deleteWCL}){
+  const [expandedId,setExpandedId]=useState(null);
+  const sorted=[...wclEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  return(
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',marginBottom:14}}>
+      <div style={{fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14}}>Entry Log</div>
+      {sorted.map(e=>(
+        <div key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 0',flexWrap:'wrap'}}>
+            <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)',minWidth:72}}>{e.date}</span>
+            {e.loggedBy&&<span style={{fontSize:11,padding:'1px 8px',borderRadius:4,background:'var(--gold-faint)',color:'var(--gold)',border:'1px solid var(--gold-border)',fontWeight:700}}>{e.loggedBy}</span>}
+            <div style={{display:'flex',gap:10,flex:1,flexWrap:'wrap'}}>
+              {[{l:'rcvd',v:e.received},{l:'acc',v:e.accepted},{l:'qual',v:e.qualified??e.conversations},{l:'off',v:e.offersMade},{l:'con',v:e.contracts},{l:'cls',v:e.closed}].map(({l,v})=>toN(v)>0&&(
+                <span key={l} style={{fontSize:12,color:'var(--text2)'}}><span style={{color:'var(--text3)'}}>{l}:</span> <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700}}>{v}</span></span>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:6}}>
+              <button onClick={()=>setExpandedId(x=>x===e.id?null:e.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:expandedId===e.id?'var(--surface3)':'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>{expandedId===e.id?'▲':'▼'}</button>
+              <button onClick={()=>editEntry(e)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
+              <button onClick={()=>deleteWCL(e.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
+            </div>
+          </div>
+          {expandedId===e.id&&(
+            <div style={{padding:'10px 14px 14px',background:'var(--surface3)',borderRadius:8,marginBottom:10}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:8}}>
+                {[{l:'Received',v:e.received},{l:'Accepted',v:e.accepted},{l:'Qualified',v:e.qualified??e.conversations},{l:'Offers Made',v:e.offersMade},{l:'Responses',v:e.offerResponses},{l:'Contracts',v:e.contracts},{l:'Closed',v:e.closed}].map(({l,v})=>(
+                  <div key={l} style={{textAlign:'center',padding:'8px',borderRadius:6,background:'var(--surface2)'}}>
+                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:800,color:'var(--text)',marginBottom:2}}>{toN(v)}</div>
+                    <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.06em'}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+              {e.rejectionReasons?.length>0&&<div style={{marginTop:10,fontSize:12,color:'var(--text3)'}}>Rejection reasons: {e.rejectionReasons.join(', ')}</div>}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function KPITracker(){
   const router=useRouter();
   const [isMobile,setIsMobile]=useState(false);
@@ -99,6 +140,16 @@ export default function KPITracker(){
   // (Log Day form state lives inside CampaignCard)
 
   useEffect(()=>{const c=()=>setIsMobile(window.innerWidth<768);c();window.addEventListener('resize',c);return()=>window.removeEventListener('resize',c);},[]);
+
+  useEffect(()=>{
+    if(typeof window!=='undefined'){
+      const params=new URLSearchParams(window.location.search);
+      if(params.get('openForm')==='true'){
+        setMainTab('WCL');
+        setTimeout(()=>openLogForm(),200);
+      }
+    }
+  },[]);// eslint-disable-line
 
   useEffect(()=>{
     fetch('/api/kpi/wcl').then(r=>r.json()).then(d=>{if(Array.isArray(d))setWclEntries(d.filter(e=>!e.deleted));}).catch(()=>{});
@@ -669,11 +720,12 @@ export default function KPITracker(){
     );
   }
 
-  // Weekly best/worst day
+  // Weekly best/worst day (by qualified)
   const weekStart=getWeekStart(todayISO());
   const weekEntries=wclEntries.filter(e=>e.date>=weekStart&&e.date<=todayISO());
-  const weekBest=weekEntries.length>1?weekEntries.reduce((b,e)=>toN(e.received)>toN(b.received)?e:b,weekEntries[0]):null;
-  const weekWorst=weekEntries.length>1?weekEntries.reduce((b,e)=>toN(e.received)<toN(b.received)?e:b,weekEntries[0]):null;
+  const wQual=e=>toN(e.qualified??e.conversations??0);
+  const weekBest=weekEntries.length>1?weekEntries.reduce((b,e)=>wQual(e)>wQual(b)?e:b,weekEntries[0]):null;
+  const weekWorst=weekEntries.length>1?weekEntries.reduce((b,e)=>wQual(e)<wQual(b)?e:b,weekEntries[0]):null;
 
   // Monthly side-by-side
   const thisMonthStr=todayISO().slice(0,7);
@@ -772,13 +824,23 @@ export default function KPITracker(){
                       {rateEl&&<div style={{paddingTop:12}}>{rateEl}</div>}
                     </div>
                     {l==='Leads Accepted'&&fAcc>0&&(
-                      <div style={{marginTop:10}}>
-                        <div style={{fontSize:12,color:'var(--text3)',marginBottom:8}}>Rejection reasons:</div>
+                      <div style={{marginTop:8}}>
+                        {fRec>fAcc&&<div style={{padding:'4px 10px',borderRadius:6,background:'var(--surface3)',display:'inline-flex',gap:6,alignItems:'center',marginBottom:8}}>
+                          <span style={{fontSize:12,color:'var(--text3)'}}>Rejected:</span>
+                          <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700,color:'var(--red)',fontSize:13}}>{fRec-fAcc}</span>
+                          <span style={{fontSize:11,color:'var(--text3)'}}>({100-fAccRate}%)</span>
+                        </div>}
+                        <div style={{fontSize:12,color:'var(--text3)',marginBottom:6}}>Rejection reasons:</div>
                         <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                           {REJ_REASONS.map(r=>{const on=rejReasons.includes(r);return(
                             <div key={r} onClick={()=>setRejReasons(x=>on?x.filter(i=>i!==r):[...x,r])} style={{padding:'6px 12px',borderRadius:6,border:`1px solid ${on?'var(--red-border)':'var(--border)'}`,background:on?'var(--red-faint)':'var(--surface3)',color:on?'var(--red)':'var(--text3)',cursor:'pointer',fontSize:13,fontWeight:on?700:400}}>{r}</div>
                           );})}
                         </div>
+                      </div>
+                    )}
+                    {l==='Qualified'&&fQual>0&&(
+                      <div style={{marginTop:6,padding:'6px 10px',borderRadius:6,background:'var(--gold-faint)',border:'1px solid var(--gold-border)',display:'inline-flex',gap:6,alignItems:'center'}}>
+                        <span style={{fontSize:12,color:'var(--gold)'}}>Target: {fQual} offer{fQual!==1?'s':''} must go out today</span>
                       </div>
                     )}
                     {l==='Offers Made'&&fQual>0&&fOfferRate<90&&(
@@ -895,13 +957,13 @@ export default function KPITracker(){
                 <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
                   {weekBest&&<div style={{padding:'12px',borderRadius:8,background:'var(--green-faint)',border:'1px solid var(--green-border)'}}>
                     <div style={{fontSize:11,color:'var(--green)',fontWeight:700,marginBottom:4}}>BEST DAY</div>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--green)'}}>{toN(weekBest.received)}</div>
-                    <div style={{fontSize:12,color:'var(--text3)'}}>{weekBest.date} leads received</div>
+                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--green)'}}>{wQual(weekBest)}</div>
+                    <div style={{fontSize:12,color:'var(--text3)'}}>{weekBest.date} qualified</div>
                   </div>}
                   {weekWorst&&<div style={{padding:'12px',borderRadius:8,background:'var(--red-faint)',border:'1px solid var(--red-border)'}}>
                     <div style={{fontSize:11,color:'var(--red)',fontWeight:700,marginBottom:4}}>WORST DAY</div>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--red)'}}>{toN(weekWorst.received)}</div>
-                    <div style={{fontSize:12,color:'var(--text3)'}}>{weekWorst.date} leads received</div>
+                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--red)'}}>{wQual(weekWorst)}</div>
+                    <div style={{fontSize:12,color:'var(--text3)'}}>{weekWorst.date} qualified</div>
                   </div>}
                 </div>
               </div>
@@ -933,24 +995,7 @@ export default function KPITracker(){
 
             {/* Entry log */}
             {wclEntries.length>0&&(
-              <div style={CARD}>
-                <div style={SEC}>Entry Log</div>
-                {[...wclEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(e=>(
-                  <div key={e.id} style={{display:'flex',alignItems:'center',gap:10,padding:'12px 0',borderBottom:'1px solid var(--border)',flexWrap:'wrap'}}>
-                    <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)',minWidth:72}}>{e.date}</span>
-                    {e.loggedBy&&<span style={{fontSize:11,padding:'1px 8px',borderRadius:4,background:'var(--gold-faint)',color:'var(--gold)',border:'1px solid var(--gold-border)',fontWeight:700}}>{e.loggedBy}</span>}
-                    <div style={{display:'flex',gap:10,flex:1,flexWrap:'wrap'}}>
-                      {[{l:'rcvd',v:e.received},{l:'acc',v:e.accepted},{l:'qual',v:e.qualified??e.conversations},{l:'off',v:e.offersMade},{l:'con',v:e.contracts},{l:'cls',v:e.closed}].map(({l,v})=>toN(v)>0&&(
-                        <span key={l} style={{fontSize:12,color:'var(--text2)'}}><span style={{color:'var(--text3)'}}>{l}:</span> <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700}}>{v}</span></span>
-                      ))}
-                    </div>
-                    <div style={{display:'flex',gap:6}}>
-                      <button onClick={()=>editEntry(e)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
-                      <button onClick={()=>deleteWCL(e.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <EntryLog wclEntries={wclEntries} editEntry={editEntry} deleteWCL={deleteWCL}/>
             )}
           </>
         )}

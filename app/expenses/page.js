@@ -113,6 +113,17 @@ export default function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState('expenses');
 
+  /* manual account balances */
+  const [manualBalances, setManualBalances] = useState({});
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [accountPinInput, setAccountPinInput] = useState('');
+  const [accountPinError, setAccountPinError] = useState('');
+  const [accountPinUnlocked, setAccountPinUnlocked] = useState(false);
+  const [accountBalanceInput, setAccountBalanceInput] = useState('');
+  const [accountSaveError, setAccountSaveError] = useState('');
+  const [accountSaveSuccess, setAccountSaveSuccess] = useState('');
+  const acctPinRef = useRef(null);
+
   /* split allocation */
   const [splits, setSplits] = useState([]);
   const [showAllocationEdit, setShowAllocationEdit] = useState(false);
@@ -207,6 +218,11 @@ export default function ExpensesPage() {
     if (session?.access?.revenue) {
       fetch('/api/revenue/splits').then(r => r.ok ? r.json() : []).then(d => {
         if (Array.isArray(d)) setSplits(d);
+      }).catch(() => {});
+    }
+    if (session) {
+      fetch('/api/expenses/manual-balance').then(r => r.ok ? r.json() : {}).then(d => {
+        if (d?.balances) setManualBalances(d.balances);
       }).catch(() => {});
     }
   }, [session]);
@@ -313,6 +329,57 @@ export default function ExpensesPage() {
     setRStartDate(rec.startDate || TODAY);
     setREndDate(rec.endDate || '');
     setShowRecurringModal(true);
+  }
+
+  /* ── account balance edit helpers ── */
+  function openAccountEdit(key, acctName) {
+    setEditingAccount(key);
+    setAccountPinInput('');
+    setAccountPinError('');
+    setAccountPinUnlocked(false);
+    setAccountBalanceInput('');
+    setAccountSaveError('');
+    setAccountSaveSuccess('');
+    setTimeout(() => acctPinRef.current?.focus(), 60);
+  }
+
+  function cancelAccountEdit() {
+    setEditingAccount(null);
+    setAccountPinInput('');
+    setAccountPinError('');
+    setAccountPinUnlocked(false);
+    setAccountBalanceInput('');
+    setAccountSaveError('');
+    setAccountSaveSuccess('');
+  }
+
+  function unlockAccountPin() {
+    if (accountPinInput === '2608') {
+      setAccountPinUnlocked(true);
+      setAccountPinError('');
+      const autoB = allocated(editingAccount) - spent(editingAccount);
+      const current = manualBalances[editingAccount] != null ? manualBalances[editingAccount] : autoB;
+      setAccountBalanceInput(current > 0 ? String(current) : '');
+    } else {
+      setAccountPinError('Incorrect PIN');
+      setAccountPinInput('');
+      setTimeout(() => acctPinRef.current?.focus(), 50);
+    }
+  }
+
+  async function saveAccountBalance() {
+    const newBalance = parseFloat(accountBalanceInput) || 0;
+    const res = await fetch('/api/expenses/manual-balance', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: editingAccount, balance: newBalance }),
+    });
+    if (res.ok) {
+      setManualBalances(prev => ({ ...prev, [editingAccount]: newBalance }));
+      setAccountSaveSuccess('✓ Balance updated');
+      setTimeout(() => { cancelAccountEdit(); }, 2000);
+    } else {
+      setAccountSaveError('Failed to save. Try again.');
+    }
   }
 
   /* ── split allocation helpers ── */
@@ -433,22 +500,79 @@ export default function ExpensesPage() {
           {ACCTS.map(a => {
             const alloc = allocated(a.key);
             const sp = spent(a.key);
-            const rem = alloc - sp;
+            const autoRem = alloc - sp;
+            const displayRem = manualBalances[a.key] != null ? manualBalances[a.key] : autoRem;
+            const isManual = manualBalances[a.key] != null;
             const pct = alloc > 0 ? (sp / alloc) * 100 : 0;
-            const over = rem < 0;
+            const over = displayRem < 0;
+            const isEditing = editingAccount === a.key;
             return (
-              <div key={a.key} style={{ background: 'var(--surface)', border: `1px solid ${a.color}44`, borderRadius: 14, padding: 18 }}>
+              <div key={a.key} style={{ background: 'var(--surface)', border: `1px solid ${isEditing ? a.color + '88' : a.color + '44'}`, borderRadius: 14, padding: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                   <span style={{ color: a.color, fontSize: 16 }}>{a.icon}</span>
-                  <span style={{ fontWeight: 700, fontSize: 14 }}>{a.label}</span>
+                  <span style={{ fontWeight: 700, fontSize: 14, flex: 1 }}>{a.label}</span>
+                  {isManual && !isEditing && (
+                    <span style={{ fontSize: 10, fontWeight: 700, background: 'var(--purple)22', color: 'var(--purple)', padding: '2px 6px', borderRadius: 4, letterSpacing: '0.04em' }}>MANUAL</span>
+                  )}
+                  {session?.access?.manageTeam && !isEditing && (
+                    <button onClick={() => openAccountEdit(a.key, a.label)} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text2)', fontSize: 11, padding: '3px 8px', borderRadius: 5, cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                  )}
+                  {isEditing && (
+                    <button onClick={cancelAccountEdit} style={{ background: 'none', border: 'none', color: 'var(--text3)', fontSize: 18, cursor: 'pointer', lineHeight: 1, padding: '0 2px' }}>×</button>
+                  )}
                 </div>
                 <div style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 24, fontWeight: 700, color: a.color, marginBottom: 4 }}>{fmt(alloc)}</div>
                 <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>allocated</div>
                 <Prog pct={pct} color={over ? 'var(--red)' : a.color} />
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 12 }}>
                   <span style={{ color: 'var(--text2)' }}>Spent: <span style={{ color: 'var(--text)', fontFamily: 'JetBrains Mono,monospace' }}>{fmt(sp)}</span></span>
-                  <span style={{ color: over ? 'var(--red)' : 'var(--text2)' }}>Rem: <span style={{ color: over ? 'var(--red)' : 'var(--green)', fontFamily: 'JetBrains Mono,monospace' }}>{fmt(rem)}</span></span>
+                  <span style={{ color: over ? 'var(--red)' : 'var(--text2)' }}>Rem: <span style={{ color: over ? 'var(--red)' : 'var(--green)', fontFamily: 'JetBrains Mono,monospace' }}>{fmt(displayRem)}</span></span>
                 </div>
+
+                {/* PIN entry panel */}
+                {isEditing && !accountPinUnlocked && (
+                  <div style={{ marginTop: 14, padding: 14, background: 'var(--surface2)', borderRadius: 10, border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>Enter admin PIN to edit balance</div>
+                    <input
+                      ref={acctPinRef}
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      value={accountPinInput}
+                      onChange={e => setAccountPinInput(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                      onKeyDown={e => { if (e.key === 'Enter') unlockAccountPin(); }}
+                      placeholder="PIN"
+                      style={{ width: 110, height: 44, textAlign: 'center', letterSpacing: '0.3em', fontFamily: 'JetBrains Mono,monospace', fontSize: 18, fontWeight: 700, padding: '0 10px', borderRadius: 8, background: 'var(--surface3)', border: `1px solid ${accountPinError ? 'var(--red)' : 'var(--border)'}`, color: 'var(--text)', outline: 'none', boxSizing: 'border-box', display: 'block', marginBottom: 8 }}
+                    />
+                    {accountPinError && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 8 }}>{accountPinError}</div>}
+                    <button onClick={unlockAccountPin} style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: 'var(--orange)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Unlock</button>
+                  </div>
+                )}
+
+                {/* Balance edit panel */}
+                {isEditing && accountPinUnlocked && (
+                  <div style={{ marginTop: 14, padding: 14, background: 'var(--surface2)', borderRadius: 10, border: `1px solid ${a.color}44` }}>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>Set account balance</div>
+                    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--surface3)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 10 }}>
+                      <span style={{ padding: '0 10px', color: 'var(--text2)', background: 'var(--surface)', borderRight: '1px solid var(--border)', height: 40, display: 'flex', alignItems: 'center', fontSize: 14 }}>$</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={accountBalanceInput}
+                        onChange={e => setAccountBalanceInput(e.target.value.replace(/[^0-9.]/g, ''))}
+                        onKeyDown={e => { if (e.key === 'Enter') saveAccountBalance(); }}
+                        placeholder="0"
+                        style={{ flex: 1, padding: '9px 12px', background: 'transparent', border: 'none', color: 'var(--text)', fontSize: 15, outline: 'none', fontFamily: 'JetBrains Mono,monospace', fontWeight: 700 }}
+                      />
+                    </div>
+                    {accountSaveError && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 8 }}>{accountSaveError}</div>}
+                    {accountSaveSuccess && <div style={{ color: 'var(--green)', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>{accountSaveSuccess}</div>}
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={saveAccountBalance} style={{ flex: 2, padding: '8px 0', borderRadius: 7, border: 'none', background: 'var(--orange)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Save Balance</button>
+                      <button onClick={cancelAccountEdit} style={{ flex: 1, padding: '8px 0', borderRadius: 7, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}

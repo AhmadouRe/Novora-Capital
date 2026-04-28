@@ -96,23 +96,7 @@ export default function KPITracker(){
   const [campStart,setCampStart]=useState(todayISO());
   const [campColor,setCampColor]=useState('var(--gold)');
 
-  // Log Day form
-  const [showLogDay,setShowLogDay]=useState(null);
-  const [ldDate,setLdDate]=useState(todayISO());
-  const [ldSent,setLdSent]=useState('');
-  const [ldLandlines,setLdLandlines]=useState('');
-  const [ldOptOuts,setLdOptOuts]=useState('');
-  const [ldReplies,setLdReplies]=useState('');
-  const [ldConvos,setLdConvos]=useState('');
-  const [ldQualified,setLdQualified]=useState('');
-  const [ldOffers,setLdOffers]=useState('');
-  const [ldResponses,setLdResponses]=useState('');
-  const [ldContracts,setLdContracts]=useState('');
-
-  // SMS entry edit
-  const [editSmsId,setEditSmsId]=useState(null);
-  const [editSmsData,setEditSmsData]=useState({});
-  const [expandedDaysFor,setExpandedDaysFor]=useState(null);
+  // (Log Day form state lives inside CampaignCard)
 
   useEffect(()=>{const c=()=>setIsMobile(window.innerWidth<768);c();window.addEventListener('resize',c);return()=>window.removeEventListener('resize',c);},[]);
 
@@ -199,10 +183,14 @@ export default function KPITracker(){
   const contractRate=pct(pContracts,pResp);
   const closedRate=pct(pClosed,pContracts);
 
+  // Combined tab: filter soft-deleted entries
+  const activeWclEntries=wclEntries.filter(e=>!e.deleted);
+  const activeSmsEntries=smsEntries.filter(e=>!e.deleted);
+
   // All-time totals
   const totalRec=wclEntries.reduce((s,e)=>s+toN(e.received),0);
   const totalAcc=wclEntries.reduce((s,e)=>s+toN(e.accepted),0);
-  const totalContracts=wclEntries.reduce((s,e)=>s+toN(e.contracts),0);
+  const totalContracts=activeWclEntries.reduce((s,e)=>s+toN(e.contracts),0);
   const totalClosed=wclEntries.reduce((s,e)=>s+toN(e.closed??0),0);
 
   // Form live calcs
@@ -293,26 +281,6 @@ export default function KPITracker(){
     if(res.ok){const d=await res.json();setCampaigns(cs=>cs.map(c=>c.id===id?d:c));}
   }
 
-  async function saveLogDay(campId){
-    const body={campaignId:campId,date:ldDate,sent:ldSent,landlines:ldLandlines,optOuts:ldOptOuts,replies:ldReplies,conversations:ldConvos,qualified:ldQualified,offersMade:ldOffers,offerResponses:ldResponses,contracts:ldContracts};
-    const res=await fetch('/api/kpi/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(res.ok){const d=await res.json();setSmsEntries(es=>[...es,d]);}
-    // keep log panel open after save — only reset fields, not panel
-    setLdSent('');setLdLandlines('');setLdOptOuts('');setLdReplies('');setLdConvos('');setLdQualified('');setLdOffers('');setLdResponses('');setLdContracts('');setLdDate(todayISO());
-  }
-
-  async function saveEditSmsDay(){
-    const res=await fetch(`/api/kpi/sms/${editSmsId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(editSmsData)});
-    if(res.ok){const d=await res.json();setSmsEntries(es=>es.map(e=>e.id===editSmsId?d:e));}
-    setEditSmsId(null);setEditSmsData({});
-  }
-
-  async function deleteSmsDay(id){
-    if(!confirm('Delete this day log?'))return;
-    const res=await fetch(`/api/kpi/sms/${id}`,{method:'DELETE'});
-    if(res.ok)setSmsEntries(es=>es.filter(e=>e.id!==id));
-  }
-
   function campStats(camp){
     const entries=smsEntries.filter(e=>e.campaignId===camp.id);
     const totalSent=entries.reduce((s,e)=>s+toN(e.sent),0);
@@ -335,7 +303,7 @@ export default function KPITracker(){
   }
 
   // 90-Day Pace
-  const totalSMSContracts=smsEntries.reduce((s,e)=>s+toN(e.contracts),0);
+  const totalSMSContracts=activeSmsEntries.reduce((s,e)=>s+toN(e.contracts),0);
   const nowDate=new Date();
   const daysLeft=Math.max(0,Math.ceil((PACE_END-nowDate)/86400000));
   const daysElapsed=Math.max(0,Math.floor((nowDate-PACE_START)/86400000));
@@ -377,12 +345,62 @@ export default function KPITracker(){
     const isArchived=camp.status==='archived';
     const campEntries=smsEntries.filter(e=>e.campaignId===camp.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
 
-    // Inline PIN delete state
+    // Card-level UI state
+    const [showLogForm,setShowLogForm]=useState(false);
+    const [showViewLogs,setShowViewLogs]=useState(false);
     const [showDeletePin,setShowDeletePin]=useState(false);
     const [deletePinVal,setDeletePinVal]=useState('');
     const [deletePinErr,setDeletePinErr]=useState('');
     const pinRef=useRef(null);
     useEffect(()=>{if(showDeletePin&&pinRef.current)pinRef.current.focus();},[showDeletePin]);
+
+    // Log form state (inside card)
+    const [logDate,setLogDate]=useState(todayISO());
+    const [logSent,setLogSent]=useState('');
+    const [logLandlines,setLogLandlines]=useState('');
+    const [logOptOuts,setLogOptOuts]=useState('');
+    const [logReplies,setLogReplies]=useState('');
+    const [logConvos,setLogConvos]=useState('');
+    const [logQualified,setLogQualified]=useState('');
+    const [logOffers,setLogOffers]=useState('');
+    const [logResponses,setLogResponses]=useState('');
+    const [logContracts,setLogContracts]=useState('');
+    const [logToast,setLogToast]=useState('');
+    const [logSaving,setLogSaving]=useState(false);
+
+    // Inline edit log state
+    const [editLogId,setEditLogId]=useState(null);
+    const [editLogData,setEditLogData]=useState({});
+
+    // Today's entry for this campaign
+    const todayCampEntry=campEntries.find(e=>e.date===todayISO());
+
+    // Live rate calcs from form
+    const lSent=toN(logSent),lLand=toN(logLandlines),lOpt=toN(logOptOuts);
+    const lDeliv=Math.max(0,lSent-lLand-lOpt);
+    const lReplies=toN(logReplies),lConvos=toN(logConvos),lQual=toN(logQualified);
+    const lOffers=toN(logOffers),lResp=toN(logResponses),lCon=toN(logContracts);
+    const lDelivRate=pct(lDeliv,lSent),lReplyRate=pct(lReplies,lDeliv),lConvoRate=pct(lConvos,lReplies);
+    const lQualRate=pct(lQual,lConvos),lOfferRate=pct(lOffers,lQual),lRespRate=pct(lResp,lOffers),lConRate=pct(lCon,lResp);
+
+    function resetLogForm(){setLogSent('');setLogLandlines('');setLogOptOuts('');setLogReplies('');setLogConvos('');setLogQualified('');setLogOffers('');setLogResponses('');setLogContracts('');}
+
+    async function saveLog(){
+      setLogSaving(true);
+      const existing=campEntries.find(e=>e.date===logDate);
+      const body={campaignId:camp.id,date:logDate,sent:logSent,landlines:logLandlines,optOuts:logOptOuts,replies:logReplies,conversations:logConvos,qualified:logQualified,offersMade:logOffers,offerResponses:logResponses,contracts:logContracts};
+      if(existing){
+        const res=await fetch(`/api/kpi/sms/${existing.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        if(res.ok){const d=await res.json();setSmsEntries(es=>es.map(e=>e.id===existing.id?d:e));}
+      } else {
+        const res=await fetch('/api/kpi/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        if(res.ok){const d=await res.json();setSmsEntries(es=>[...es,d]);}
+      }
+      resetLogForm();
+      setLogToast(existing?'✓ Updated!':'✓ Saved!');
+      setTimeout(()=>setLogToast(''),2200);
+      setLogSaving(false);
+    }
 
     async function confirmDel(){
       if(deletePinVal!=='2608'){setDeletePinErr('Incorrect PIN');setDeletePinVal('');if(pinRef.current)pinRef.current.focus();return;}
@@ -390,6 +408,27 @@ export default function KPITracker(){
       if(res.ok){setCampaigns(cs=>cs.filter(c=>c.id!==camp.id));setSmsEntries(es=>es.filter(e=>e.campaignId!==camp.id));}
       else setDeletePinErr('Delete failed.');
     }
+
+    async function saveEditLog(){
+      const res=await fetch(`/api/kpi/sms/${editLogId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(editLogData)});
+      if(res.ok){const d=await res.json();setSmsEntries(es=>es.map(e=>e.id===editLogId?d:e));}
+      setEditLogId(null);setEditLogData({});
+    }
+
+    async function deleteLog(id){
+      const res=await fetch(`/api/kpi/sms/${id}`,{method:'DELETE'});
+      if(res.ok)setSmsEntries(es=>es.filter(e=>e.id!==id));
+    }
+
+    // Weekly totals grouped by Mon-Sun
+    const weeklyMap={};
+    campEntries.forEach(e=>{
+      const ws=getWeekStart(e.date);
+      if(!weeklyMap[ws])weeklyMap[ws]={sent:0,replies:0,qualified:0,contracts:0,count:0};
+      weeklyMap[ws].sent+=toN(e.sent);weeklyMap[ws].replies+=toN(e.replies);
+      weeklyMap[ws].qualified+=toN(e.qualified);weeklyMap[ws].contracts+=toN(e.contracts);weeklyMap[ws].count++;
+    });
+    const weeklyRows=Object.entries(weeklyMap).sort((a,b)=>b[0].localeCompare(a[0]));
 
     const campRates=[
       {l:'Deliverability',r:stats.delivRate,low:65,high:75},
@@ -403,9 +442,10 @@ export default function KPITracker(){
 
     return(
       <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:`4px solid ${cc}`,borderRadius:14,padding:'20px 24px',marginBottom:14}}>
+
         {/* Header */}
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:10,marginBottom:14}}>
-          <div>
+        <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10,marginBottom:14}}>
+          <div style={{flex:1}}>
             <div style={{fontSize:16,fontWeight:800,color:'var(--text)',marginBottom:6}}>{camp.name}</div>
             <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
               {camp.county&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text2)',border:'1px solid var(--border)'}}>{camp.county}</span>}
@@ -415,34 +455,28 @@ export default function KPITracker(){
               {isArchived&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text3)',border:'1px solid var(--border)',fontWeight:700}}>ARCHIVED</span>}
             </div>
           </div>
-          {/* Inline delete PIN */}
-          {!showDeletePin?(
-            <button onClick={()=>{if(isArchived){if(confirm(`Delete "${camp.name}"?`)){fetch(`/api/kpi/campaigns/${camp.id}`,{method:'DELETE'}).then(r=>{if(r.ok){setCampaigns(cs=>cs.filter(c=>c.id!==camp.id));setSmsEntries(es=>es.filter(e=>e.campaignId!==camp.id));}});}}else setShowDeletePin(true);}} style={{padding:'5px 12px',borderRadius:7,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',fontSize:12,fontWeight:600,cursor:'pointer'}}>Delete</button>
-          ):(
-            <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6}}>
-              <input
-                ref={pinRef}
-                type="password" inputMode="numeric" maxLength={4}
-                value={deletePinVal}
-                onChange={e=>setDeletePinVal(e.target.value.replace(/\D/g,'').slice(0,4))}
-                onKeyDown={e=>{if(e.key==='Enter')confirmDel();if(e.key==='Escape'){setShowDeletePin(false);setDeletePinVal('');setDeletePinErr('');}}}
-                placeholder="PIN"
-                style={{width:100,height:40,textAlign:'center',letterSpacing:'0.3em',fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:700,borderRadius:8,background:'var(--surface3)',border:`1px solid ${deletePinErr?'var(--red)':'var(--border)'}`,color:'var(--text)',outline:'none',boxSizing:'border-box'}}
-              />
-              {deletePinErr&&<span style={{fontSize:11,color:'var(--red)'}}>{deletePinErr}</span>}
-              <div style={{display:'flex',gap:6}}>
-                <button onClick={()=>{setShowDeletePin(false);setDeletePinVal('');setDeletePinErr('');}} style={{padding:'5px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text2)',fontSize:12,cursor:'pointer'}}>Cancel</button>
-                <button onClick={confirmDel} style={{padding:'5px 10px',borderRadius:6,border:'none',background:'var(--red)',color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer'}}>Confirm</button>
-              </div>
-            </div>
-          )}
         </div>
+
+        {/* TODAY section */}
+        {todayCampEntry&&(
+          <div style={{marginBottom:14,padding:'12px 14px',borderRadius:10,background:'var(--surface3)',border:`1px solid ${cc}33`}}>
+            <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:cc,marginBottom:8}}>TODAY</div>
+            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+              {[{l:'Sent',v:todayCampEntry.sent},{l:'Replies',v:todayCampEntry.replies},{l:'Qualified',v:todayCampEntry.qualified},{l:'Contracts',v:todayCampEntry.contracts}].map(({l,v})=>toN(v)>0&&(
+                <div key={l} style={{textAlign:'center',padding:'6px 10px',borderRadius:6,background:'var(--surface2)'}}>
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:800,color:'var(--text)'}}>{fmtNum(toN(v))}</div>
+                  <div style={{fontSize:10,color:'var(--text3)',marginTop:1}}>{l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Progress bar */}
         {stats.planned>0&&(
           <div style={{marginBottom:14}}>
-            <div style={{display:'flex',justifyContent:'space-between',fontSize:13,color:'var(--text3)',marginBottom:6}}>
-              <span>Texts sent: {stats.totalSent.toLocaleString()} of {stats.planned.toLocaleString()}</span>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text3)',marginBottom:6}}>
+              <span>Sent: {stats.totalSent.toLocaleString()} of {stats.planned.toLocaleString()}</span>
               <span>{pct(stats.totalSent,stats.planned)}%</span>
             </div>
             <div style={{height:8,borderRadius:4,background:'var(--surface3)',overflow:'hidden'}}>
@@ -451,92 +485,130 @@ export default function KPITracker(){
           </div>
         )}
 
-        {/* Numbers-first stat cards */}
-        <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:14}}>
-          {[{l:'Sent',v:stats.totalSent,c:'var(--text)'},{l:'Replies',v:stats.replies,c:'var(--cyan)'},{l:'Qualified',v:stats.cQual,c:'var(--gold)'},{l:'Contracts',v:stats.cContracts,c:'var(--green)'}].map(({l,v,c})=>(
-            <div key={l} style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:70}}>
-              <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:c}}>{v}</div>
-              <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{l}</div>
-            </div>
-          ))}
-          {stats.costPerReply&&<div style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:70}}><div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--text)'}}>{'$'+stats.costPerReply}</div><div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>$/Reply</div></div>}
-          {stats.costPerContract&&<div style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:70}}><div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--green)'}}>{'$'+Number(stats.costPerContract).toLocaleString()}</div><div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>$/Contract</div></div>}
-        </div>
-
-        {/* Rates */}
-        {campRates.map(({l,r,low,high})=>{
-          const color=r>=high?'var(--gold)':r>=low?'var(--green)':'var(--red)';
-          const status=r>=high?'ABOVE':r>=low?'IN RANGE':'BELOW';
-          return(
-            <div key={l} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid var(--border)',flexWrap:'wrap',gap:6}}>
-              <span style={{fontSize:13,color:'var(--text2)'}}>{l}</span>
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:15,fontWeight:800,color}}>{r}%</span>
-                <span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:color+'18',color,border:`1px solid ${color}40`,fontWeight:700}}>{status}</span>
-                <span style={{fontSize:10,color:'var(--text3)'}}>target {low}–{high}%</span>
+        {/* ALL TIME TOTALS */}
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>All Time Totals</div>
+          <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+            {[{l:'Sent',v:stats.totalSent,c:'var(--text)'},{l:'Replies',v:stats.replies,c:'var(--cyan)'},{l:'Qualified',v:stats.cQual,c:'var(--gold)'},{l:'Contracts',v:stats.cContracts,c:'var(--green)'}].map(({l,v,c})=>(
+              <div key={l} style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:68}}>
+                <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:c}}>{fmtNum(v)}</div>
+                <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{l}</div>
               </div>
-            </div>
-          );
-        })}
-
-        {/* Action buttons */}
-        <div style={{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}}>
-          {isActive&&<button onClick={()=>setShowLogDay(showLogDay===camp.id?null:camp.id)} style={{padding:'8px 16px',borderRadius:8,border:'none',background:cc,color:'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>Log Day</button>}
-          {isActive&&<button onClick={()=>pauseCampaign(camp.id)} style={{padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface3)',color:'var(--text2)',fontSize:13,cursor:'pointer',fontWeight:600}}>Pause</button>}
-          {isActive&&<button onClick={()=>archiveCampaign(camp.id)} style={{padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface3)',color:'var(--text3)',fontSize:12,cursor:'pointer'}}>Archive</button>}
-          {isPaused&&<button onClick={()=>resumeCampaign(camp.id)} style={{padding:'8px 16px',borderRadius:8,border:'none',background:cc,color:'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>Resume</button>}
-          {isPaused&&<button onClick={()=>archiveCampaign(camp.id)} style={{padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface3)',color:'var(--text3)',fontSize:12,cursor:'pointer'}}>Archive</button>}
+            ))}
+            {stats.costPerReply&&<div style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:68}}><div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--text)'}}>{'$'+stats.costPerReply}</div><div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>$/Reply</div></div>}
+            {stats.costPerContract&&<div style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:68}}><div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--green)'}}>{'$'+Number(stats.costPerContract).toLocaleString()}</div><div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>$/Contract</div></div>}
+          </div>
         </div>
 
-        {/* Log Day form */}
-        {isActive&&showLogDay===camp.id&&(
-          <div style={{marginTop:14,padding:'16px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)'}}>
-            <div style={{fontSize:13,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',marginBottom:12}}>Log Day — {camp.name}</div>
-            <div style={{marginBottom:12}}><DatePicker label="Date" value={ldDate} onChange={setLdDate}/></div>
+        {/* RATES */}
+        <div style={{marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>Rates</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {campRates.map(({l,r,low,high})=>{
+              const color=r>=high?'var(--gold)':r>=low?'var(--green)':'var(--red)';
+              const arrow=r>=high?'↑':r>=low?'✓':'↓';
+              return(
+                <div key={l} style={{padding:'5px 9px',borderRadius:7,background:color+'18',border:`1px solid ${color}40`,display:'flex',alignItems:'center',gap:5}}>
+                  <span style={{fontSize:10,color:'var(--text3)'}}>{l}</span>
+                  <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,fontWeight:800,color}}>{r}% {arrow}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Button row: LOG TODAY / VIEW ALL LOGS / PAUSE / DELETE */}
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          {isActive&&(
+            <button onClick={()=>{setShowLogForm(f=>!f);setShowViewLogs(false);}} style={{padding:'8px 16px',borderRadius:8,border:'none',background:showLogForm?'var(--surface3)':cc,color:showLogForm?'var(--text2)':'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>
+              {showLogForm?'Close Form':'Log Today'}
+            </button>
+          )}
+          {campEntries.length>0&&(
+            <button onClick={()=>{setShowViewLogs(f=>!f);setShowLogForm(false);}} style={{padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:showViewLogs?'var(--surface2)':'transparent',color:showViewLogs?'var(--text)':'var(--text2)',fontWeight:600,fontSize:13,cursor:'pointer'}}>
+              {showViewLogs?'Hide Logs':`View All Logs (${campEntries.length})`}
+            </button>
+          )}
+          {isActive&&<button onClick={()=>pauseCampaign(camp.id)} style={{padding:'8px 14px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',fontSize:12,cursor:'pointer',fontWeight:500}}>Pause</button>}
+          {isPaused&&<button onClick={()=>resumeCampaign(camp.id)} style={{padding:'8px 16px',borderRadius:8,border:'none',background:cc,color:'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>Resume</button>}
+          {isPaused&&<button onClick={()=>archiveCampaign(camp.id)} style={{padding:'8px 14px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',fontSize:12,cursor:'pointer'}}>Archive</button>}
+          {/* Inline PIN delete */}
+          {!showDeletePin?(
+            <button onClick={()=>{if(isArchived){fetch(`/api/kpi/campaigns/${camp.id}`,{method:'DELETE'}).then(r=>{if(r.ok){setCampaigns(cs=>cs.filter(c=>c.id!==camp.id));setSmsEntries(es=>es.filter(e=>e.campaignId!==camp.id));}});}else setShowDeletePin(true);}} style={{padding:'8px 14px',borderRadius:8,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',fontSize:12,fontWeight:600,cursor:'pointer',marginLeft:'auto'}}>Delete</button>
+          ):(
+            <div style={{display:'flex',alignItems:'center',gap:6,marginLeft:'auto',flexWrap:'wrap'}}>
+              <input ref={pinRef} type="password" inputMode="numeric" maxLength={4} value={deletePinVal} onChange={e=>setDeletePinVal(e.target.value.replace(/\D/g,'').slice(0,4))} onKeyDown={e=>{if(e.key==='Enter')confirmDel();if(e.key==='Escape'){setShowDeletePin(false);setDeletePinVal('');setDeletePinErr('');}}} placeholder="PIN" style={{width:90,height:36,textAlign:'center',letterSpacing:'0.3em',fontFamily:'JetBrains Mono,monospace',fontSize:16,fontWeight:700,borderRadius:7,background:'var(--surface3)',border:`1px solid ${deletePinErr?'var(--red)':'var(--border)'}`,color:'var(--text)',outline:'none',boxSizing:'border-box'}}/>
+              {deletePinErr&&<span style={{fontSize:11,color:'var(--red)'}}>{deletePinErr}</span>}
+              <button onClick={confirmDel} style={{padding:'6px 12px',borderRadius:6,border:'none',background:'var(--red)',color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer'}}>Confirm</button>
+              <button onClick={()=>{setShowDeletePin(false);setDeletePinVal('');setDeletePinErr('');}} style={{padding:'6px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text2)',fontSize:12,cursor:'pointer'}}>Cancel</button>
+            </div>
+          )}
+        </div>
+
+        {/* LOG TODAY form */}
+        {isActive&&showLogForm&&(
+          <div style={{marginTop:14,padding:'16px',borderRadius:10,background:'var(--surface3)',border:`1px solid ${cc}44`}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <div style={{fontSize:12,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em'}}>Log Day — {camp.name}</div>
+              {logToast&&<span style={{fontSize:12,fontWeight:700,color:'var(--green)',padding:'3px 10px',borderRadius:6,background:'var(--green-faint)',border:'1px solid var(--green-border)'}}>{logToast}</span>}
+            </div>
+            {campEntries.find(e=>e.date===logDate)&&(
+              <div style={{marginBottom:10,padding:'6px 10px',borderRadius:6,background:'var(--gold-faint)',border:'1px solid var(--gold-border)',fontSize:12,color:'var(--gold)',fontWeight:600}}>Entry exists for this date — saving will update it.</div>
+            )}
+            <div style={{marginBottom:12}}><DatePicker label="Date" value={logDate} onChange={setLogDate}/></div>
             <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(3,1fr)',gap:10}}>
-              {[{l:'Sent',v:ldSent,set:setLdSent},{l:'Landlines',v:ldLandlines,set:setLdLandlines},{l:'Opt-Outs',v:ldOptOuts,set:setLdOptOuts}].map(({l,v,set})=>(
-                <div key={l}><label style={LBL}>{l}</label><input style={INPUT} type="text" inputMode="numeric" value={v} onChange={e=>set(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)' }/></div>
+              {[{l:'Sent',v:logSent,set:setLogSent},{l:'Landlines',v:logLandlines,set:setLogLandlines},{l:'Opt-Outs',v:logOptOuts,set:setLogOptOuts}].map(({l,v,set})=>(
+                <div key={l}><label style={LBL}>{l}</label><input style={INPUT} type="text" inputMode="numeric" value={v} onChange={e=>set(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
               ))}
-              <div><label style={LBL}>Deliverable (auto)</label><div style={{minHeight:48,padding:'12px 16px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',color:'var(--cyan)',fontSize:15,display:'flex',alignItems:'center'}}>{Math.max(0,toN(ldSent)-toN(ldLandlines)-toN(ldOptOuts)).toLocaleString()}</div></div>
-              {[{l:'Replies',v:ldReplies,set:setLdReplies},{l:'Conversations',v:ldConvos,set:setLdConvos},{l:'Qualified',v:ldQualified,set:setLdQualified},{l:'Offers Made',v:ldOffers,set:setLdOffers},{l:'Offer Responses',v:ldResponses,set:setLdResponses},{l:'Contracts',v:ldContracts,set:setLdContracts}].map(({l,v,set})=>(
-                <div key={l}><label style={LBL}>{l}</label><input style={INPUT} type="text" inputMode="numeric" value={v} onChange={e=>set(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)' }/></div>
+              <div><label style={LBL}>Deliverable (auto)</label><div style={{minHeight:48,padding:'12px 16px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',color:'var(--cyan)',fontSize:15,display:'flex',alignItems:'center'}}>{lDeliv.toLocaleString()}</div></div>
+              {[{l:'Replies',v:logReplies,set:setLogReplies},{l:'Conversations',v:logConvos,set:setLogConvos},{l:'Qualified',v:logQualified,set:setLogQualified},{l:'Offers Made',v:logOffers,set:setLogOffers},{l:'Offer Responses',v:logResponses,set:setLogResponses},{l:'Contracts',v:logContracts,set:setLogContracts}].map(({l,v,set})=>(
+                <div key={l}><label style={LBL}>{l}</label><input style={INPUT} type="text" inputMode="numeric" value={v} onChange={e=>set(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
               ))}
             </div>
-            <button onClick={()=>saveLogDay(camp.id)} style={{marginTop:12,width:'100%',minHeight:46,borderRadius:10,border:'none',background:cc,color:'#000',fontWeight:800,fontSize:14,cursor:'pointer'}}>Save Day Log</button>
+            {/* Live rate pills */}
+            {lSent>0&&(
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:10}}>
+                {[{l:'Deliv',r:lDelivRate,low:65,high:75},{l:'Reply',r:lReplyRate,low:2,high:5},{l:'Convo',r:lConvoRate,low:40,high:60},{l:'Qual',r:lQualRate,low:30,high:40},{l:'Offer',r:lOfferRate,low:90,high:100},{l:'Resp',r:lRespRate,low:25,high:35},{l:'Contract',r:lConRate,low:15,high:25}].filter(({r})=>r>0).map(({l,r,low,high})=>{
+                  const color=r>=high?'var(--gold)':r>=low?'var(--green)':'var(--red)';
+                  return <span key={l} style={{fontSize:11,padding:'3px 8px',borderRadius:5,background:color+'18',color,border:`1px solid ${color}40`,fontFamily:'JetBrains Mono,monospace',fontWeight:700}}>{l}: {r}%</span>;
+                })}
+              </div>
+            )}
+            <button onClick={saveLog} disabled={logSaving} style={{marginTop:12,width:'100%',minHeight:46,borderRadius:10,border:'none',background:cc,color:'#000',fontWeight:800,fontSize:14,cursor:'pointer'}}>{logSaving?'Saving…':'Save Log'}</button>
           </div>
         )}
 
-        {/* VIEW HISTORY inline */}
-        {campEntries.length>0&&(
+        {/* VIEW ALL LOGS panel */}
+        {showViewLogs&&campEntries.length>0&&(
           <div style={{marginTop:14}}>
-            <button onClick={()=>setExpandedDaysFor(expandedDaysFor===camp.id?null:camp.id)} style={{background:'none',border:'none',color:'var(--cyan)',fontSize:13,cursor:'pointer',padding:0,fontWeight:600}}>
-              {expandedDaysFor===camp.id?'▲ Hide History':'▼ View History'} ({campEntries.length} day{campEntries.length!==1?'s':''})
-            </button>
-            {expandedDaysFor===camp.id&&(
-              <div style={{marginTop:10,borderRadius:8,overflow:'hidden',border:'1px solid var(--border)'}}>
-                <div style={{display:'grid',gridTemplateColumns:'100px 1fr auto',background:'var(--surface3)',padding:'8px 12px',gap:8}}>
+
+            {/* Section 1: Log table */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>Log Entries</div>
+              <div style={{borderRadius:8,overflow:'hidden',border:'1px solid var(--border)'}}>
+                <div style={{display:'grid',gridTemplateColumns:'90px 1fr auto',background:'var(--surface3)',padding:'8px 12px',gap:8}}>
                   <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase'}}>Date</span>
                   <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase'}}>Stats</span>
                   <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase'}}>Actions</span>
                 </div>
                 {campEntries.map(entry=>(
                   <div key={entry.id}>
-                    {editSmsId===entry.id?(
+                    {editLogId===entry.id?(
                       <div style={{padding:'12px',borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
                         <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:10}}>
                           {['sent','landlines','optOuts','replies','conversations','qualified','offersMade','offerResponses','contracts'].map(field=>(
                             <div key={field}><label style={{...LBL,marginBottom:4,fontSize:10}}>{field}</label>
-                              <input style={{...INPUT,minHeight:36,padding:'6px 10px',fontSize:13}} type="text" inputMode="numeric" value={editSmsData[field]||''} onChange={e=>setEditSmsData(d=>({...d,[field]:e.target.value.replace(/[^0-9]/g,'')}))}/>
+                              <input style={{...INPUT,minHeight:36,padding:'6px 10px',fontSize:13}} type="text" inputMode="numeric" value={editLogData[field]||''} onChange={e=>setEditLogData(d=>({...d,[field]:e.target.value.replace(/[^0-9]/g,'')}))}/>
                             </div>
                           ))}
                         </div>
                         <div style={{display:'flex',gap:8}}>
-                          <button onClick={saveEditSmsDay} style={{padding:'6px 14px',borderRadius:6,border:'none',background:'var(--green)',color:'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>Save</button>
-                          <button onClick={()=>{setEditSmsId(null);setEditSmsData({});}} style={{padding:'6px 14px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text2)',fontSize:13,cursor:'pointer'}}>Cancel</button>
+                          <button onClick={saveEditLog} style={{padding:'6px 14px',borderRadius:6,border:'none',background:'var(--green)',color:'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>Save</button>
+                          <button onClick={()=>{setEditLogId(null);setEditLogData({});}} style={{padding:'6px 14px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text2)',fontSize:13,cursor:'pointer'}}>Cancel</button>
                         </div>
                       </div>
                     ):(
-                      <div style={{display:'grid',gridTemplateColumns:'100px 1fr auto',alignItems:'center',padding:'10px 12px',borderBottom:'1px solid var(--border)',gap:8}}>
+                      <div style={{display:'grid',gridTemplateColumns:'90px 1fr auto',alignItems:'center',padding:'10px 12px',borderBottom:'1px solid var(--border)',gap:8}}>
                         <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)'}}>{entry.date}</span>
                         <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
                           {[{l:'sent',v:entry.sent},{l:'replies',v:entry.replies},{l:'qual',v:entry.qualified},{l:'con',v:entry.contracts}].map(({l,v})=>toN(v)>0&&(
@@ -544,15 +616,53 @@ export default function KPITracker(){
                           ))}
                         </div>
                         <div style={{display:'flex',gap:6}}>
-                          <button onClick={()=>{setEditSmsId(entry.id);setEditSmsData({sent:entry.sent||'',landlines:entry.landlines||'',optOuts:entry.optOuts||'',replies:entry.replies||'',conversations:entry.conversations||'',qualified:entry.qualified||'',offersMade:entry.offersMade||'',offerResponses:entry.offerResponses||'',contracts:entry.contracts||''});}} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
-                          <button onClick={()=>deleteSmsDay(entry.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
+                          <button onClick={()=>{setEditLogId(entry.id);setEditLogData({sent:entry.sent||'',landlines:entry.landlines||'',optOuts:entry.optOuts||'',replies:entry.replies||'',conversations:entry.conversations||'',qualified:entry.qualified||'',offersMade:entry.offersMade||'',offerResponses:entry.offerResponses||'',contracts:entry.contracts||''});}} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
+                          <button onClick={()=>deleteLog(entry.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
                         </div>
                       </div>
                     )}
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Section 2: Weekly totals grouped by Mon-Sun */}
+            {weeklyRows.length>0&&(
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>Weekly Totals</div>
+                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {weeklyRows.map(([ws,wt])=>(
+                    <div key={ws} style={{padding:'10px 12px',borderRadius:8,background:'var(--surface3)',border:'1px solid var(--border)',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
+                      <span style={{fontSize:12,color:'var(--text3)',fontFamily:'JetBrains Mono,monospace',minWidth:76}}>Wk {ws.slice(5)}</span>
+                      <div style={{display:'flex',gap:10,flex:1,flexWrap:'wrap'}}>
+                        {[{l:'Sent',v:wt.sent,c:'var(--text)'},{l:'Replies',v:wt.replies,c:'var(--cyan)'},{l:'Qualified',v:wt.qualified,c:'var(--gold)'},{l:'Contracts',v:wt.contracts,c:'var(--green)'}].map(({l,v,c})=>(
+                          <span key={l} style={{fontSize:12}}><span style={{color:'var(--text3)'}}>{l}:</span> <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700,color:c}}>{v.toLocaleString()}</span></span>
+                        ))}
+                      </div>
+                      <span style={{fontSize:11,color:'var(--text3)'}}>{wt.count} day{wt.count!==1?'s':''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
+
+            {/* Section 3: Campaign totals summary tiles */}
+            <div>
+              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>Campaign Summary</div>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:8}}>
+                {[
+                  {l:'Total Sent',v:stats.totalSent,c:'var(--text)'},{l:'Delivered',v:stats.deliv,c:'var(--cyan)'},
+                  {l:'Replies',v:stats.replies,c:'var(--cyan)'},{l:'Conversations',v:stats.cConvos,c:'var(--gold)'},
+                  {l:'Qualified',v:stats.cQual,c:'var(--gold)'},{l:'Offers',v:stats.cOffers,c:'var(--orange)'},
+                  {l:'Responses',v:stats.cResp,c:'var(--orange)'},{l:'Contracts',v:stats.cContracts,c:'var(--green)'},
+                ].map(({l,v,c})=>(
+                  <div key={l} style={{textAlign:'center',padding:'10px 8px',borderRadius:8,background:'var(--surface3)'}}>
+                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:800,color:c}}>{v.toLocaleString()}</div>
+                    <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -573,16 +683,16 @@ export default function KPITracker(){
   const lastMonthEntries=wclEntries.filter(e=>e.date.startsWith(lastMonthStr));
   const mSum=(es,key)=>es.reduce((s,e)=>s+toN(key==='qualified'?e.qualified??e.conversations??0:e[key]),0);
 
-  // Today all channels (for Combined tab)
+  // Today all channels (for Combined tab) — uses active filtered entries
   const todayISOS=todayISO();
-  const todaySMSEntries=smsEntries.filter(e=>e.date===todayISOS);
-  const todayWCLEntry=wclEntries.find(e=>e.date===todayISOS);
+  const todaySMSEntries=activeSmsEntries.filter(e=>e.date===todayISOS);
+  const todayWCLEntry=activeWclEntries.find(e=>e.date===todayISOS);
   const todayAllRec=toN(todayWCLEntry?.received)+(todaySMSEntries.reduce((s,e)=>s+toN(e.sent),0));
   const todayAllCon=toN(todayWCLEntry?.contracts)+(todaySMSEntries.reduce((s,e)=>s+toN(e.contracts),0));
 
-  // This week all channels
-  const weekWCLContracts=weekEntries.reduce((s,e)=>s+toN(e.contracts),0);
-  const weekSMSEntries=smsEntries.filter(e=>e.date>=weekStart&&e.date<=todayISOS);
+  // This week all channels — uses active filtered entries
+  const weekWCLContracts=activeWclEntries.filter(e=>e.date>=weekStart&&e.date<=todayISOS).reduce((s,e)=>s+toN(e.contracts),0);
+  const weekSMSEntries=activeSmsEntries.filter(e=>e.date>=weekStart&&e.date<=todayISOS);
   const weekSMSContracts=weekSMSEntries.reduce((s,e)=>s+toN(e.contracts),0);
   const weekAllContracts=weekWCLContracts+weekSMSContracts;
 
@@ -969,7 +1079,7 @@ export default function KPITracker(){
                   {l:'WCL Contracts',v:weekWCLContracts,c:'var(--gold)'},
                   {l:'SMS Contracts',v:weekSMSContracts,c:'var(--cyan)'},
                   {l:'Combined',v:weekAllContracts,c:paceColor},
-                  {l:'WCL Leads',v:weekEntries.reduce((s,e)=>s+toN(e.received),0),c:'var(--text2)'},
+                  {l:'WCL Leads',v:activeWclEntries.filter(e=>e.date>=weekStart&&e.date<=todayISOS).reduce((s,e)=>s+toN(e.received),0),c:'var(--text2)'},
                 ].map(s=>(
                   <div key={s.l} style={{textAlign:'center',padding:'12px 8px',borderRadius:10,background:'var(--surface3)'}}>
                     <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:24,fontWeight:800,color:s.c,marginBottom:4}}>{s.v}</div>

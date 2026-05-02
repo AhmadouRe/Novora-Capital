@@ -32,6 +32,8 @@ export async function POST(request) {
     id: Date.now().toString(),
     date,
     conversations: Number(body.conversations) || 0,
+    optouts: Number(body.optouts) || 0,
+    wrongNumbers: Number(body.wrongNumbers) || 0,
     qualified: Number(body.qualified) || 0,
     offers: Number(body.offers) || 0,
     responses: Number(body.responses) || 0,

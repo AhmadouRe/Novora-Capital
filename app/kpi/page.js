@@ -581,8 +581,10 @@ function PipelineTab({ wcl, sms, campaigns, settings, onRefresh }) {
 
   function fv(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
-  const wclFields = ['received', 'conversations', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
-  const smsFields = ['conversations', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
+  const wclFields = ['received', 'optouts', 'conversations', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
+  const smsFields = ['conversations', 'optouts', 'wrongNumbers', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
+  const FIELD_LABELS = { optouts: 'Opt-Outs', wrongNumbers: 'Wrong Numbers' };
+  function fieldLabel(f) { return FIELD_LABELS[f] || f; }
 
   function blankForm(type) {
     const fields = type === 'wcl' ? wclFields : smsFields;
@@ -654,7 +656,7 @@ function PipelineTab({ wcl, sms, campaigns, settings, onRefresh }) {
         {fields.map(f => (
           <div key={f} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '10px 8px', textAlign: 'center' }}>
             <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: accentColor }}>{(totals[f] || 0).toLocaleString()}</div>
-            <div style={{ fontSize: 10, color: C.t3, textTransform: 'capitalize', marginTop: 2 }}>{f}</div>
+            <div style={{ fontSize: 10, color: C.t3, textTransform: 'capitalize', marginTop: 2 }}>{fieldLabel(f)}</div>
           </div>
         ))}
       </div>
@@ -680,8 +682,8 @@ function PipelineTab({ wcl, sms, campaigns, settings, onRefresh }) {
             )}
             {fields.map(f => (
               <div key={f}>
-                <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4, textTransform: 'capitalize' }}>{f}</label>
-                <input type="text" inputMode="numeric" value={form[f] || '0'} onChange={e => fv(f, e.target.value)}
+                <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4, textTransform: 'capitalize' }}>{fieldLabel(f)}</label>
+                <input type="text" inputMode="numeric" pattern="[0-9]*" value={form[f] || '0'} onChange={e => fv(f, e.target.value)}
                   style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
               </div>
             ))}
@@ -732,7 +734,7 @@ function PipelineTab({ wcl, sms, campaigns, settings, onRefresh }) {
                 {fields.map(f => (
                   <div key={f} style={{ textAlign: 'center', minWidth: 54 }}>
                     <div style={{ fontSize: 16, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: safeNum(e[f]) > 0 ? accentColor : C.t3 }}>{safeNum(e[f])}</div>
-                    <div style={{ fontSize: 10, color: C.t3, textTransform: 'capitalize' }}>{f}</div>
+                    <div style={{ fontSize: 10, color: C.t3, textTransform: 'capitalize' }}>{fieldLabel(f)}</div>
                   </div>
                 ))}
               </div>

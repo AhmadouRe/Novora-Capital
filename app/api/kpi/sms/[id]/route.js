@@ -6,7 +6,7 @@ import { writeAudit } from '../../../../lib/audit.js';
 export const dynamic = 'force-dynamic';
 
 const KEY = 'nc:kpi:sms';
-const FIELDS = ['conversations', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
+const FIELDS = ['conversations', 'optouts', 'wrongNumbers', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
 
 export async function PUT(request, { params }) {
   const session = await validateSession(request.cookies.get('novora_session')?.value);

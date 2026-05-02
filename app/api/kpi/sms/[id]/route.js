@@ -14,6 +14,7 @@ export async function PUT(request, { params }) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const body = await request.json();
   const updated = await updateItem('nc:kpi:sms', params.id, body);
+  await writeAudit(session.userId, session.userName, 'novora-capital', 'SMS_UPDATED', params.id);
   return NextResponse.json(updated);
 }
 

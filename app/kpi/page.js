@@ -1,97 +1,165 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import DatePicker from '../components/DatePicker.js';
 
 const toN=v=>{const n=Number(String(v||'').replace(/[^0-9.-]/g,''));return isNaN(n)?0:n;};
-const pct=(a,b)=>b>0?Math.round(a/b*100):0;
-const fmt=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
+const safeDiv=(a,b)=>b===0?0:a/b;
+const safePct=(a,b)=>b===0?0:(a/b)*100;
+const fmtPct=n=>Math.round(n)+'%';
 const todayISO=()=>new Date().toISOString().slice(0,10);
+const fmt$=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0});
 
 function getWeekStart(dateStr){
   const d=new Date((dateStr||todayISO())+'T00:00:00');
-  const day=d.getDay();
-  const diff=day===0?6:day-1;
-  d.setDate(d.getDate()-diff);
-  return d.toISOString().slice(0,10);
+  const day=d.getDay();const diff=day===0?6:day-1;
+  d.setDate(d.getDate()-diff);return d.toISOString().slice(0,10);
 }
 
-const INPUT={minHeight:48,padding:'12px 16px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)',color:'var(--text)',fontSize:15,outline:'none',fontFamily:'Outfit,sans-serif',width:'100%',transition:'border-color 0.15s',boxSizing:'border-box'};
-const LBL={fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.11em',color:'var(--text3)',marginBottom:8,display:'block'};
-const CARD={background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',marginBottom:14};
-const SEC={fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14};
-
-const REJ_REASONS=['Bad comps','No equity','Luxury price','Lot/land','Bad area','Wrong market','Already listed','Other'];
-const REJ_COLORS=['var(--gold)','var(--cyan)','var(--purple)','var(--red)','var(--orange)','var(--green)','var(--text2)','var(--border2)'];
-const CAMP_COLORS=['var(--gold)','var(--cyan)','var(--purple)','var(--red)','var(--orange)','var(--green)'];
-const CHART_TOOLTIP={contentStyle:{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:10,padding:'12px 16px',fontFamily:'JetBrains Mono,monospace',fontSize:13},labelStyle:{color:'var(--text2)',marginBottom:6}};
-
-// 90-Day Pace constants
 const PACE_START=new Date('2026-04-25T00:00:00');
 const PACE_END=new Date('2026-07-25T00:00:00');
 const PACE_TOTAL_DAYS=91;
 const GOAL_CONTRACTS=6;
 
-function fmtNum(n){return Number(n||0).toLocaleString('en-US');}
+const LIST_TYPES=['Absentee+Tax Delinquent','Absentee+Equity','Tax Delinquent','Probate','Pre-Foreclosure','Tired Landlord','Other'];
+const CAMP_COLORS=['#E8A020','#06B6D4','#A78BFA','#22C55E','#EF4444','#F97316'];
+const REJ_REASONS=['Bad comps','No equity','Luxury price','Lot/land','Bad area','Wrong market','Already listed','Other'];
 
-function NInput({id,value,onChange,autoFocus}){
-  return <input
-    id={id}
-    style={{...INPUT,maxWidth:200,fontFamily:'JetBrains Mono,monospace',fontSize:18}}
-    type="text" inputMode="numeric" pattern="[0-9]*"
-    value={value}
-    onChange={e=>onChange(e.target.value.replace(/[^0-9]/g,''))}
-    autoFocus={autoFocus}
-    onFocus={e=>e.target.style.borderColor='var(--border2)'}
-    onBlur={e=>e.target.style.borderColor='var(--border)'}
-  />;
+const INPUT={minHeight:48,padding:'12px 16px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)',color:'var(--text)',fontSize:15,outline:'none',fontFamily:'Outfit,sans-serif',width:'100%',transition:'border-color 0.15s',boxSizing:'border-box'};
+const LBL={fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.11em',color:'var(--text3)',marginBottom:8,display:'block'};
+const BTN={minHeight:44,padding:'0 20px',borderRadius:10,border:'none',background:'var(--gold)',color:'#000',fontWeight:800,fontSize:14,cursor:'pointer'};
+const BTN2={minHeight:44,padding:'0 16px',borderRadius:10,border:'1px solid var(--border)',background:'var(--surface3)',color:'var(--text2)',fontWeight:700,fontSize:14,cursor:'pointer'};
+const CARD={background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',marginBottom:14};
+
+function NInput({id,value,onChange,placeholder,autoFocus,style={}}){
+  return <input id={id} style={{...INPUT,fontFamily:'JetBrains Mono,monospace',fontSize:16,...style}} type="text" inputMode="numeric" pattern="[0-9]*" value={value} placeholder={placeholder||'0'} onChange={e=>onChange(e.target.value.replace(/[^0-9]/g,''))} autoFocus={autoFocus} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/>;
 }
 
-function RateIndicator({rate,low,high}){
-  const n=toN(rate);
-  const color=n>=high?'var(--gold)':n>=low?'var(--green)':'var(--red)';
-  const status=n>=high?'ABOVE':n>=low?'IN RANGE':'BELOW';
-  return <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6}}>
-    <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:14,fontWeight:700,color}}>{n}%</span>
-    <span style={{fontSize:11,padding:'1px 6px',borderRadius:4,background:color+'18',color,border:`1px solid ${color}40`,fontWeight:700}}>{status}</span>
-    <span style={{fontSize:11,color:'var(--text3)'}}>target {low}–{high}%</span>
-  </div>;
+function Stat({label,value,sub,color}){
+  return(
+    <div style={{textAlign:'center',padding:'12px 8px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)'}}>
+      <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:900,color:color||'var(--text)'}}>{value}</div>
+      <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.07em',marginTop:3}}>{label}</div>
+      {sub&&<div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{sub}</div>}
+    </div>
+  );
 }
 
-function EntryLog({wclEntries,editEntry,deleteWCL}){
+function WipeGate({onInitialized}){
+  const [checking,setChecking]=useState(true);
+  const [needsWipe,setNeedsWipe]=useState(false);
+  const [wiping,setWiping]=useState(false);
+
+  useEffect(()=>{
+    fetch('/api/kpi/wipe').then(r=>r.json()).then(d=>{
+      if(d.initialized){onInitialized();}
+      else{setNeedsWipe(true);}
+      setChecking(false);
+    }).catch(()=>{setChecking(false);onInitialized();});
+  },[]);// eslint-disable-line
+
+  async function doWipe(){
+    setWiping(true);
+    await fetch('/api/kpi/wipe',{method:'POST'});
+    setWiping(false);
+    onInitialized();
+  }
+
+  if(checking)return<div style={{padding:40,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;
+  if(!needsWipe)return null;
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',zIndex:500,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'var(--surface)',border:'1px solid var(--border2)',borderRadius:20,width:480,maxWidth:'95vw',padding:32}}>
+        <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--gold)',marginBottom:8}}>KPI Upgrade Required</div>
+        <div style={{fontSize:20,fontWeight:900,color:'var(--text)',marginBottom:12}}>Initialize KPI v2</div>
+        <p style={{color:'var(--text2)',fontSize:14,lineHeight:1.6,marginBottom:24}}>
+          The KPI system has been upgraded with a new data schema. All previous test data will be cleared so you can enter real data with clean fields. This cannot be undone.
+        </p>
+        <div style={{display:'flex',gap:12}}>
+          <button onClick={doWipe} disabled={wiping} style={{...BTN,flex:1,opacity:wiping?0.7:1}}>{wiping?'Clearing…':'Clear & Initialize'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EntryLog({wclEntries,onEdit,onDelete}){
   const [expandedId,setExpandedId]=useState(null);
   const sorted=[...wclEntries].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  if(sorted.length===0)return<div style={{...CARD,color:'var(--text3)',fontSize:14,textAlign:'center',padding:'28px 24px'}}>No WCL entries yet.</div>;
   return(
-    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',marginBottom:14}}>
-      <div style={{fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14}}>Entry Log</div>
+    <div style={CARD}>
+      <div style={{fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14}}>Entry Log ({sorted.length})</div>
       {sorted.map(e=>(
         <div key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
-          <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 0',flexWrap:'wrap'}}>
-            <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)',minWidth:72}}>{e.date}</span>
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'11px 0',flexWrap:'wrap'}}>
+            <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)',minWidth:76}}>{e.date}</span>
             {e.loggedBy&&<span style={{fontSize:11,padding:'1px 8px',borderRadius:4,background:'var(--gold-faint)',color:'var(--gold)',border:'1px solid var(--gold-border)',fontWeight:700}}>{e.loggedBy}</span>}
             <div style={{display:'flex',gap:10,flex:1,flexWrap:'wrap'}}>
-              {[{l:'rcvd',v:e.received},{l:'acc',v:e.accepted},{l:'qual',v:e.qualified??e.conversations},{l:'off',v:e.offersMade},{l:'con',v:e.contracts},{l:'cls',v:e.closed}].map(({l,v})=>toN(v)>0&&(
+              {[['rcvd',e.received],['acc',e.accepted],['conv',e.conversations],['qual',e.qualified],['off',e.offers],['con',e.contracts],['cls',e.closed]].map(([l,v])=>toN(v)>0&&(
                 <span key={l} style={{fontSize:12,color:'var(--text2)'}}><span style={{color:'var(--text3)'}}>{l}:</span> <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700}}>{v}</span></span>
               ))}
             </div>
             <div style={{display:'flex',gap:6}}>
-              <button onClick={()=>setExpandedId(x=>x===e.id?null:e.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:expandedId===e.id?'var(--surface3)':'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>{expandedId===e.id?'▲':'▼'}</button>
-              <button onClick={()=>editEntry(e)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
-              <button onClick={()=>deleteWCL(e.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
+              <button onClick={()=>setExpandedId(x=>x===e.id?null:e.id)} style={{padding:'3px 9px',borderRadius:6,border:'1px solid var(--border)',background:expandedId===e.id?'var(--surface3)':'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>{expandedId===e.id?'▲':'▼'}</button>
+              <button onClick={()=>onEdit(e)} style={{padding:'3px 9px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
+              <button onClick={()=>onDelete(e.id)} style={{padding:'3px 9px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
             </div>
           </div>
           {expandedId===e.id&&(
-            <div style={{padding:'10px 14px 14px',background:'var(--surface3)',borderRadius:8,marginBottom:10}}>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:8}}>
-                {[{l:'Received',v:e.received},{l:'Accepted',v:e.accepted},{l:'Qualified',v:e.qualified??e.conversations},{l:'Offers Made',v:e.offersMade},{l:'Responses',v:e.offerResponses},{l:'Contracts',v:e.contracts},{l:'Closed',v:e.closed}].map(({l,v})=>(
-                  <div key={l} style={{textAlign:'center',padding:'8px',borderRadius:6,background:'var(--surface2)'}}>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:800,color:'var(--text)',marginBottom:2}}>{toN(v)}</div>
-                    <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.06em'}}>{l}</div>
+            <div style={{padding:'10px 12px 14px',background:'var(--surface3)',borderRadius:8,marginBottom:10}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:8,marginBottom:8}}>
+                {[['Received',e.received],['Accepted',e.accepted],['Convos',e.conversations],['Qualified',e.qualified],['Offers',e.offers],['Contracts',e.contracts],['Closed',e.closed]].map(([l,v])=>(
+                  <div key={l} style={{textAlign:'center',padding:'8px 4px',borderRadius:6,background:'var(--surface2)'}}>
+                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:900,color:'var(--text)'}}>{toN(v)}</div>
+                    <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
                   </div>
                 ))}
               </div>
-              {e.rejectionReasons?.length>0&&<div style={{marginTop:10,fontSize:12,color:'var(--text3)'}}>Rejection reasons: {e.rejectionReasons.join(', ')}</div>}
+              {e.rejectionReasons&&e.rejectionReasons.length>0&&<div style={{fontSize:12,color:'var(--text3)'}}>Rejections: {Array.isArray(e.rejectionReasons)?e.rejectionReasons.join(', '):e.rejectionReasons}</div>}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SMSEntryLog({entries,campaigns,onEdit,onDelete}){
+  const [expandedId,setExpandedId]=useState(null);
+  const sorted=[...entries].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const campName=id=>{const c=campaigns.find(x=>x.id===id);return c?c.name:id;};
+  if(sorted.length===0)return<div style={{...CARD,color:'var(--text3)',fontSize:14,textAlign:'center',padding:'28px 24px'}}>No SMS entries yet.</div>;
+  return(
+    <div style={CARD}>
+      <div style={{fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14}}>SMS Entry Log ({sorted.length})</div>
+      {sorted.map(e=>(
+        <div key={e.id} style={{borderBottom:'1px solid var(--border)'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,padding:'11px 0',flexWrap:'wrap'}}>
+            <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)',minWidth:76}}>{e.date}</span>
+            <span style={{fontSize:11,padding:'1px 8px',borderRadius:4,background:'var(--purple-faint,rgba(167,139,250,0.1))',color:'var(--purple,#A78BFA)',border:'1px solid var(--purple-border,rgba(167,139,250,0.3))',fontWeight:700,maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{campName(e.campaignId)}</span>
+            <div style={{display:'flex',gap:10,flex:1,flexWrap:'wrap'}}>
+              {[['sent',e.sent],['replies',e.totalReplies],['int',e.interestedReplies],['conv',e.conversations],['qual',e.qualified],['off',e.offers],['con',e.contracts]].map(([l,v])=>toN(v)>0&&(
+                <span key={l} style={{fontSize:12,color:'var(--text2)'}}><span style={{color:'var(--text3)'}}>{l}:</span> <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700}}>{v}</span></span>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:6}}>
+              <button onClick={()=>setExpandedId(x=>x===e.id?null:e.id)} style={{padding:'3px 9px',borderRadius:6,border:'1px solid var(--border)',background:expandedId===e.id?'var(--surface3)':'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>{expandedId===e.id?'▲':'▼'}</button>
+              <button onClick={()=>onEdit(e)} style={{padding:'3px 9px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
+              <button onClick={()=>onDelete(e.id)} style={{padding:'3px 9px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
+            </div>
+          </div>
+          {expandedId===e.id&&(
+            <div style={{padding:'10px 12px 14px',background:'var(--surface3)',borderRadius:8,marginBottom:10}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:8}}>
+                {[['Sent',e.sent],['Total Replies',e.totalReplies],['Interested',e.interestedReplies],['Optouts',e.optouts],['Convos',e.conversations],['Qualified',e.qualified],['Offers',e.offers],['Contracts',e.contracts],['Closed',e.closed]].map(([l,v])=>(
+                  <div key={l} style={{textAlign:'center',padding:'8px 4px',borderRadius:6,background:'var(--surface2)'}}>
+                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:16,fontWeight:900,color:'var(--text)'}}>{toN(v)}</div>
+                    <div style={{fontSize:10,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.05em'}}>{l}</div>
+                  </div>
+                ))}
+              </div>
+              {toN(e.cost)>0&&<div style={{marginTop:8,fontSize:12,color:'var(--text3)'}}>Cost: {fmt$(e.cost)}</div>}
             </div>
           )}
         </div>
@@ -102,42 +170,55 @@ function EntryLog({wclEntries,editEntry,deleteWCL}){
 
 export default function KPITracker(){
   const router=useRouter();
+  const [initialized,setInitialized]=useState(false);
   const [isMobile,setIsMobile]=useState(false);
   const [mainTab,setMainTab]=useState('WCL');
-  const [period,setPeriod]=useState('Daily');
+  const [period,setPeriod]=useState('Weekly');
   const [wclEntries,setWclEntries]=useState([]);
   const [campaigns,setCampaigns]=useState([]);
   const [smsEntries,setSmsEntries]=useState([]);
-  const [showLogForm,setShowLogForm]=useState(false);
-  const [wclToast,setWclToast]=useState('');
-  const [selectedDate,setSelectedDate]=useState(todayISO());
+  const [settings,setSettings]=useState({wclCost:4.99,smsCostPerText:0.04,diagnosticMinDays:5,interestedReplyFloor:2.0,offerRateFloor:90});
+  const [toast,setToast]=useState('');
 
-  // WCL form
+  // WCL form state
+  const [showLogForm,setShowLogForm]=useState(false);
   const [wclDate,setWclDate]=useState(todayISO());
   const [received,setReceived]=useState('');
   const [accepted,setAccepted]=useState('');
-  const [rejReasons,setRejReasons]=useState([]);
+  const [conversations,setConversations]=useState('');
   const [qualified,setQualified]=useState('');
-  const [offersMade,setOffersMade]=useState('');
-  const [offerResponses,setOfferResponses]=useState('');
+  const [offers,setOffers]=useState('');
   const [contracts,setContracts]=useState('');
-  const [closed,setClosed]=useState('');
-  const [editId,setEditId]=useState(null);
-  const [saving,setSaving]=useState(false);
+  const [closedW,setClosedW]=useState('');
+  const [rejReasons,setRejReasons]=useState([]);
+  const [editWclId,setEditWclId]=useState(null);
+  const [savingWcl,setSavingWcl]=useState(false);
 
-  // Campaign form
+  // Campaign form state
   const [showCampForm,setShowCampForm]=useState(false);
   const [campName,setCampName]=useState('');
+  const [campListType,setCampListType]=useState(LIST_TYPES[0]);
   const [campCounty,setCampCounty]=useState('');
-  const [campFilter,setCampFilter]=useState('Absentee+Tax Delinquent+Equity');
-  const [campList,setCampList]=useState('');
-  const [campDaily,setCampDaily]=useState('450');
-  const [campDuration,setCampDuration]=useState('');
-  const [campCost,setCampCost]=useState('150');
   const [campStart,setCampStart]=useState(todayISO());
-  const [campColor,setCampColor]=useState('var(--gold)');
+  const [campContacts,setCampContacts]=useState('');
+  const [savingCamp,setSavingCamp]=useState(false);
 
-  // (Log Day form state lives inside CampaignCard)
+  // SMS log form state
+  const [showSmsForm,setShowSmsForm]=useState(false);
+  const [smsCampaignId,setSmsCampaignId]=useState('');
+  const [smsDate,setSmsDate]=useState(todayISO());
+  const [smsSent,setSmsSent]=useState('');
+  const [smsTotalReplies,setSmsTotalReplies]=useState('');
+  const [smsIntReplies,setSmsIntReplies]=useState('');
+  const [smsOptouts,setSmsOptouts]=useState('');
+  const [smsConvos,setSmsConvos]=useState('');
+  const [smsQual,setSmsQual]=useState('');
+  const [smsOffers,setSmsOffers]=useState('');
+  const [smsContracts,setSmsContracts]=useState('');
+  const [smsClosed,setSmsClosed]=useState('');
+  const [smsCost,setSmsCost]=useState('');
+  const [editSmsId,setEditSmsId]=useState(null);
+  const [savingSms,setSavingSms]=useState(false);
 
   useEffect(()=>{const c=()=>setIsMobile(window.innerWidth<768);c();window.addEventListener('resize',c);return()=>window.removeEventListener('resize',c);},[]);
 
@@ -146,1042 +227,669 @@ export default function KPITracker(){
       const params=new URLSearchParams(window.location.search);
       if(params.get('openForm')==='true'){
         setMainTab('WCL');
-        setTimeout(()=>openLogForm(),200);
+        setTimeout(()=>openWclForm(),300);
       }
     }
   },[]);// eslint-disable-line
 
-  useEffect(()=>{
+  function loadData(){
     fetch('/api/kpi/wcl').then(r=>r.json()).then(d=>{if(Array.isArray(d))setWclEntries(d.filter(e=>!e.deleted));}).catch(()=>{});
     fetch('/api/kpi/campaigns').then(r=>r.json()).then(d=>{if(Array.isArray(d))setCampaigns(d.filter(c=>!c.deleted));}).catch(()=>{});
     fetch('/api/kpi/sms').then(r=>r.json()).then(d=>{if(Array.isArray(d))setSmsEntries(d.filter(e=>!e.deleted));}).catch(()=>{});
-  },[]);
+    fetch('/api/kpi/settings').then(r=>r.json()).then(d=>{if(d&&!d.error)setSettings(s=>({...s,...d}));}).catch(()=>{});
+  }
 
-  // When selectedDate changes → pre-fill form if entry exists
-  useEffect(()=>{
-    if(!showLogForm)return;
-    const existing=wclEntries.find(e=>e.date===selectedDate);
+  function flash(m){setToast(m);setTimeout(()=>setToast(''),2500);}
+
+  // ── WCL helpers ──────────────────────────────────────────────
+  function openWclForm(existing){
     if(existing){
-      setEditId(existing.id);
-      setWclDate(existing.date||selectedDate);
+      setEditWclId(existing.id);
+      setWclDate(existing.date||todayISO());
       setReceived(String(existing.received||''));
       setAccepted(String(existing.accepted||''));
-      setRejReasons(existing.rejectionReasons||[]);
-      setQualified(String(existing.qualified??existing.conversations??''));
-      setOffersMade(String(existing.offersMade||''));
-      setOfferResponses(String(existing.offerResponses||''));
+      setConversations(String(existing.conversations||''));
+      setQualified(String(existing.qualified||''));
+      setOffers(String(existing.offers||''));
       setContracts(String(existing.contracts||''));
-      setClosed(String(existing.closed||''));
+      setClosedW(String(existing.closed||''));
+      setRejReasons(Array.isArray(existing.rejectionReasons)?existing.rejectionReasons:[]);
     } else {
-      setEditId(null);
-      setWclDate(selectedDate);
-      setReceived('');setAccepted('');setRejReasons([]);setQualified('');
-      setOffersMade('');setOfferResponses('');setContracts('');setClosed('');
+      setEditWclId(null);setWclDate(todayISO());
+      setReceived('');setAccepted('');setConversations('');setQualified('');
+      setOffers('');setContracts('');setClosedW('');setRejReasons([]);
     }
-  },[selectedDate,showLogForm]);// eslint-disable-line
-
-  function openLogForm(){
     setShowLogForm(true);
-    const existing=wclEntries.find(e=>e.date===selectedDate);
-    if(existing){
-      setEditId(existing.id);
-      setWclDate(existing.date||selectedDate);
-      setReceived(String(existing.received||''));
-      setAccepted(String(existing.accepted||''));
-      setRejReasons(existing.rejectionReasons||[]);
-      setQualified(String(existing.qualified??existing.conversations??''));
-      setOffersMade(String(existing.offersMade||''));
-      setOfferResponses(String(existing.offerResponses||''));
-      setContracts(String(existing.contracts||''));
-      setClosed(String(existing.closed||''));
-    } else {
-      setEditId(null);setWclDate(selectedDate);
-      setReceived('');setAccepted('');setRejReasons([]);setQualified('');
-      setOffersMade('');setOfferResponses('');setContracts('');setClosed('');
-    }
-    setTimeout(()=>{const el=document.getElementById('wcl-first-input');if(el)el.focus();},80);
+    setTimeout(()=>{const el=document.getElementById('wcl-first');if(el)el.focus();},80);
   }
 
-  // Period-filtered data for funnel
-  function getPeriodEntries(period,entries){
-    const today=todayISO();
-    if(period==='Daily') return entries.filter(e=>e.date===today);
-    if(period==='Weekly'){
-      const weekStart=getWeekStart(today);
-      return entries.filter(e=>e.date>=weekStart&&e.date<=today);
-    }
-    const monthStr=today.slice(0,7);
-    return entries.filter(e=>e.date.startsWith(monthStr));
-  }
-
-  const periodEntries=getPeriodEntries(period,wclEntries);
-  const todayEntry=wclEntries.find(e=>e.date===todayISO())||null;
-  const selectedEntry=wclEntries.find(e=>e.date===selectedDate)||null;
-
-  // Funnel totals (period-based)
-  const pRec=periodEntries.reduce((s,e)=>s+toN(e.received),0);
-  const pAcc=periodEntries.reduce((s,e)=>s+toN(e.accepted),0);
-  const pQual=periodEntries.reduce((s,e)=>s+toN(e.qualified??e.conversations??0),0);
-  const pOffers=periodEntries.reduce((s,e)=>s+toN(e.offersMade),0);
-  const pResp=periodEntries.reduce((s,e)=>s+toN(e.offerResponses),0);
-  const pContracts=periodEntries.reduce((s,e)=>s+toN(e.contracts),0);
-  const pClosed=periodEntries.reduce((s,e)=>s+toN(e.closed??0),0);
-
-  const accRate=pct(pAcc,pRec);
-  const qualRate=pct(pQual,pAcc);
-  const offerRate=pct(pOffers,pQual);
-  const respRate=pct(pResp,pOffers);
-  const contractRate=pct(pContracts,pResp);
-  const closedRate=pct(pClosed,pContracts);
-
-  // Combined tab: filter soft-deleted entries
-  const activeWclEntries=wclEntries.filter(e=>!e.deleted);
-  const activeSmsEntries=smsEntries.filter(e=>!e.deleted);
-
-  // All-time totals
-  const totalRec=wclEntries.reduce((s,e)=>s+toN(e.received),0);
-  const totalAcc=wclEntries.reduce((s,e)=>s+toN(e.accepted),0);
-  const totalContracts=activeWclEntries.reduce((s,e)=>s+toN(e.contracts),0);
-  const totalClosed=wclEntries.reduce((s,e)=>s+toN(e.closed??0),0);
-
-  // Form live calcs
-  const fRec=toN(received),fAcc=toN(accepted),fQual=toN(qualified),fOffers=toN(offersMade),fResp=toN(offerResponses),fContracts=toN(contracts),fClosed=toN(closed);
-  const fAccRate=pct(fAcc,fRec),fQualRate=pct(fQual,fAcc),fOfferRate=pct(fOffers,fQual),fRespRate=pct(fResp,fOffers),fContractRate=pct(fContracts,fResp),fClosedRate=pct(fClosed,fContracts);
-
-  const chartData=wclEntries.slice().reverse().map(e=>({
-    date:e.date?.slice(5),
-    received:toN(e.received),
-    accepted:toN(e.accepted),
-    offers:toN(e.offersMade),
-    contracts:toN(e.contracts)
-  }));
-
-  const rejMap={};
-  wclEntries.forEach(e=>{(e.rejectionReasons||[]).forEach(r=>{rejMap[r]=(rejMap[r]||0)+1;});});
-  const rejData=Object.entries(rejMap).sort((a,b)=>b[1]-a[1]).map(([reason,count])=>({reason,count,pct:totalAcc>0?Math.round(count/totalAcc*100):0}));
-
-  // Sequential diagnostics — only first failure fires
-  function wclDiagnostic(){
-    if(pRec===0)return null;
-    if(pOffers<pQual&&pQual>0)return{color:'var(--red)',bg:'var(--red-faint)',border:'var(--red-border)',title:'OFFER DISCIPLINE ISSUE',msg:`${pOffers} offers made vs ${pQual} qualified leads. Every qualified lead gets an offer. No exceptions.`};
-    if(pOffers>0&&pResp===0)return{color:'var(--red)',bg:'var(--red-faint)',border:'var(--red-border)',title:'OFFER DELIVERY ISSUE',msg:'Offers delivered but zero responses. Are you presenting terms before price? Delivering same day?'};
-    if(pResp>0&&pContracts===0)return{color:'var(--gold)',bg:'var(--gold-faint)',border:'var(--gold-border)',title:'NEGOTIATION ISSUE',msg:'Sellers engaging but not signing. Review objection handling and contract close techniques.'};
-    if(accRate<55)return{color:'var(--gold)',bg:'var(--gold-faint)',border:'var(--gold-border)',title:'WCL QUALITY ISSUE',msg:`Acceptance rate is ${accRate}%. Check targeting filters and list quality.`};
-    return{color:'var(--green)',bg:'var(--green-faint)',border:'var(--green-border)',title:'✓ WCL PIPELINE HEALTHY',msg:'Maintain volume and monitor daily.'};
-  }
-  const diag=wclDiagnostic();
-
-  async function saveWCL(){
-    setSaving(true);
-    const body={date:wclDate,received,accepted,rejectionReasons:rejReasons,qualified,offersMade,offerResponses,contracts,closed};
-    if(editId){
-      const res=await fetch(`/api/kpi/wcl/${editId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(res.ok){const d=await res.json();setWclEntries(e=>e.map(x=>x.id===editId?d:x));}
+  async function saveWcl(){
+    if(!wclDate)return flash('Date required.');
+    setSavingWcl(true);
+    const body={date:wclDate,received:toN(received),accepted:toN(accepted),conversations:toN(conversations),qualified:toN(qualified),offers:toN(offers),contracts:toN(contracts),closed:toN(closedW),rejectionReasons:rejReasons};
+    if(editWclId){
+      const res=await fetch(`/api/kpi/wcl/${editWclId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(res.ok){const d=await res.json();setWclEntries(e=>e.map(x=>x.id===editWclId?d:x));flash('✓ Entry updated!');}
+      else flash('Failed to update.');
     } else {
       const res=await fetch('/api/kpi/wcl',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(res.ok){const d=await res.json();setWclEntries(e=>[d,...e]);setEditId(d.id);}
+      if(res.status===409){
+        const d=await res.json();
+        // find duplicate and edit it instead
+        const dup=wclEntries.find(e=>e.date===wclDate);
+        if(dup){setEditWclId(dup.id);flash('Entry for this date exists — updating it.');setSavingWcl(false);return;}
+        flash(d.error||'Duplicate.');setSavingWcl(false);return;
+      }
+      if(res.ok){const d=await res.json();setWclEntries(e=>[d,...e]);setEditWclId(d.id);flash('✓ Saved!');}
+      else flash('Failed to save.');
     }
-    // save-without-close: clear numeric fields, keep date, show toast
-    setReceived('');setAccepted('');setRejReasons([]);setQualified('');
-    setOffersMade('');setOfferResponses('');setContracts('');setClosed('');
-    setWclToast('✓ Saved!');
-    setTimeout(()=>setWclToast(''),2200);
-    setTimeout(()=>{const el=document.getElementById('wcl-first-input');if(el)el.focus();},100);
-    setSaving(false);
+    // keep form open, clear number fields for re-entry
+    setReceived('');setAccepted('');setConversations('');setQualified('');
+    setOffers('');setContracts('');setClosedW('');setRejReasons([]);
+    setTimeout(()=>{const el=document.getElementById('wcl-first');if(el)el.focus();},80);
+    setSavingWcl(false);
   }
 
-  function editEntry(e){
-    setEditId(e.id);
-    setWclDate(e.date||todayISO());
-    setReceived(String(e.received||''));
-    setAccepted(String(e.accepted||''));
-    setRejReasons(e.rejectionReasons||[]);
-    setQualified(String(e.qualified??e.conversations??''));
-    setOffersMade(String(e.offersMade||''));
-    setOfferResponses(String(e.offerResponses||''));
-    setContracts(String(e.contracts||''));
-    setClosed(String(e.closed||''));
-    setShowLogForm(true);
-    window.scrollTo({top:0,behavior:'smooth'});
+  async function deleteWcl(id){
+    if(!confirm('Delete this WCL entry?'))return;
+    await fetch(`/api/kpi/wcl/${id}`,{method:'DELETE'});
+    setWclEntries(e=>e.filter(x=>x.id!==id));
+    flash('Entry deleted.');
   }
 
-  async function deleteWCL(id){
-    if(!confirm('Delete this entry?'))return;
-    const res=await fetch(`/api/kpi/wcl/${id}`,{method:'DELETE'});
-    if(res.ok)setWclEntries(e=>e.filter(x=>x.id!==id));
-  }
-
+  // ── Campaign helpers ─────────────────────────────────────────
   async function createCampaign(){
-    const body={name:campName,county:campCounty,filterStack:campFilter,listSize:campList,dailySend:campDaily,duration:campDuration,cost:campCost,startDate:campStart,color:campColor,status:'active'};
+    if(!campName.trim())return flash('Campaign name required.');
+    setSavingCamp(true);
+    const body={name:campName,listType:campListType,county:campCounty,startDate:campStart,totalContacts:toN(campContacts),status:'active'};
     const res=await fetch('/api/kpi/campaigns',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    if(res.ok){const d=await res.json();setCampaigns(c=>[...c,d]);setShowCampForm(false);setCampName('');setCampCounty('');setCampList('');setCampDuration('');setCampCost('150');}
+    if(res.status===409){flash('Campaign with this name and date already exists.');setSavingCamp(false);return;}
+    if(res.ok){const d=await res.json();setCampaigns(c=>[...c,d]);setShowCampForm(false);setCampName('');setCampCounty('');setCampContacts('');flash('✓ Campaign created!');}
+    else flash('Failed to create campaign.');
+    setSavingCamp(false);
   }
 
-  async function pauseCampaign(id){
-    const res=await fetch(`/api/kpi/campaigns/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'paused'})});
+  async function setCampStatus(id,status){
+    const res=await fetch(`/api/kpi/campaigns/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})});
     if(res.ok){const d=await res.json();setCampaigns(cs=>cs.map(c=>c.id===id?d:c));}
   }
 
-  async function resumeCampaign(id){
-    const res=await fetch(`/api/kpi/campaigns/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'active'})});
-    if(res.ok){const d=await res.json();setCampaigns(cs=>cs.map(c=>c.id===id?d:c));}
+  async function deleteCampaign(id){
+    if(!confirm('Delete this campaign and all its SMS entries? This cannot be undone.'))return;
+    const res=await fetch(`/api/kpi/campaigns/${id}`,{method:'DELETE'});
+    if(res.ok){
+      setCampaigns(c=>c.filter(x=>x.id!==id));
+      setSmsEntries(s=>s.filter(e=>e.campaignId!==id));
+      flash('Campaign deleted.');
+    }
   }
 
-  async function archiveCampaign(id){
-    const res=await fetch(`/api/kpi/campaigns/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:'archived'})});
-    if(res.ok){const d=await res.json();setCampaigns(cs=>cs.map(c=>c.id===id?d:c));}
+  // ── SMS helpers ───────────────────────────────────────────────
+  function openSmsForm(existing,presetCampaignId){
+    if(existing){
+      setEditSmsId(existing.id);
+      setSmsCampaignId(existing.campaignId||'');
+      setSmsDate(existing.date||todayISO());
+      setSmsSent(String(existing.sent||''));
+      setSmsTotalReplies(String(existing.totalReplies||''));
+      setSmsIntReplies(String(existing.interestedReplies||''));
+      setSmsOptouts(String(existing.optouts||''));
+      setSmsConvos(String(existing.conversations||''));
+      setSmsQual(String(existing.qualified||''));
+      setSmsOffers(String(existing.offers||''));
+      setSmsContracts(String(existing.contracts||''));
+      setSmsClosed(String(existing.closed||''));
+      setSmsCost(String(existing.cost||''));
+    } else {
+      setEditSmsId(null);
+      setSmsCampaignId(presetCampaignId||'');
+      setSmsDate(todayISO());
+      setSmsSent('');setSmsTotalReplies('');setSmsIntReplies('');setSmsOptouts('');
+      setSmsConvos('');setSmsQual('');setSmsOffers('');setSmsContracts('');setSmsClosed('');setSmsCost('');
+    }
+    setShowSmsForm(true);
   }
 
+  async function saveSms(){
+    if(!smsCampaignId)return flash('Select a campaign.');
+    if(!smsDate)return flash('Date required.');
+    setSavingSms(true);
+    const body={campaignId:smsCampaignId,date:smsDate,sent:toN(smsSent),totalReplies:toN(smsTotalReplies),interestedReplies:toN(smsIntReplies),optouts:toN(smsOptouts),conversations:toN(smsConvos),qualified:toN(smsQual),offers:toN(smsOffers),contracts:toN(smsContracts),closed:toN(smsClosed),cost:toN(smsCost)};
+    if(editSmsId){
+      const res=await fetch(`/api/kpi/sms/${editSmsId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(res.ok){const d=await res.json();setSmsEntries(e=>e.map(x=>x.id===editSmsId?d:x));flash('✓ SMS entry updated!');}
+      else flash('Failed to update.');
+    } else {
+      const res=await fetch('/api/kpi/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(res.status===409){flash('Entry for this campaign+date already exists. Edit it instead.');setSavingSms(false);return;}
+      if(res.ok){const d=await res.json();setSmsEntries(e=>[d,...e]);flash('✓ SMS entry saved!');}
+      else flash('Failed to save.');
+    }
+    setShowSmsForm(false);
+    setSavingSms(false);
+  }
+
+  async function deleteSms(id){
+    if(!confirm('Delete this SMS entry?'))return;
+    await fetch(`/api/kpi/sms/${id}`,{method:'DELETE'});
+    setSmsEntries(e=>e.filter(x=>x.id!==id));
+    flash('SMS entry deleted.');
+  }
+
+  // ── Computed values ───────────────────────────────────────────
+  const today=todayISO();
+
+  function getPeriodEntries(p,entries){
+    if(p==='Daily')return entries.filter(e=>e.date===today);
+    if(p==='Weekly'){const ws=getWeekStart(today);return entries.filter(e=>e.date>=ws&&e.date<=today);}
+    return entries.filter(e=>e.date.startsWith(today.slice(0,7)));
+  }
+
+  const periodWcl=getPeriodEntries(period,wclEntries);
+  const pRec=periodWcl.reduce((s,e)=>s+toN(e.received),0);
+  const pAcc=periodWcl.reduce((s,e)=>s+toN(e.accepted),0);
+  const pConv=periodWcl.reduce((s,e)=>s+toN(e.conversations),0);
+  const pQual=periodWcl.reduce((s,e)=>s+toN(e.qualified),0);
+  const pOff=periodWcl.reduce((s,e)=>s+toN(e.offers),0);
+  const pCon=periodWcl.reduce((s,e)=>s+toN(e.contracts),0);
+  const pCls=periodWcl.reduce((s,e)=>s+toN(e.closed),0);
+
+  const accRate=safePct(pAcc,pRec);
+  const qualRate=safePct(pQual,pAcc);
+  const offerRate=safePct(pOff,pQual);
+  const contractRate=safePct(pCon,pOff);
+
+  // Form live calcs
+  const fRec=toN(received),fAcc=toN(accepted),fQual=toN(qualified),fOff=toN(offers);
+  const fRejected=Math.max(0,fRec-fAcc);
+  const fRejPct=fRec>0?Math.round(safeDiv(fRejected,fRec)*100):0;
+
+  // Weekly best/worst by qualified
+  function weekGroups(entries){
+    const map={};
+    entries.forEach(e=>{const ws=getWeekStart(e.date);if(!map[ws])map[ws]={week:ws,qual:0,off:0,con:0};map[ws].qual+=toN(e.qualified);map[ws].off+=toN(e.offers);map[ws].con+=toN(e.contracts);});
+    return Object.values(map).sort((a,b)=>b.week.localeCompare(a.week));
+  }
+  const weeks=weekGroups(wclEntries);
+  const bestWeek=weeks.length>0?weeks.reduce((a,b)=>b.qual>a.qual?b:a,weeks[0]):null;
+  const worstWeek=weeks.length>1?weeks.reduce((a,b)=>b.qual<a.qual?b:a,weeks[0]):null;
+
+  // 90-day pace
+  const nowDate=new Date();
+  const daysElapsed=Math.max(0,Math.floor((nowDate-PACE_START)/86400000));
+  const daysLeft=Math.max(0,Math.ceil((PACE_END-nowDate)/86400000));
+  const totalWclContracts=wclEntries.reduce((s,e)=>s+toN(e.contracts),0);
+  const totalSmsContracts=smsEntries.reduce((s,e)=>s+toN(e.contracts),0);
+  const combinedContracts=totalWclContracts+totalSmsContracts;
+  const projectedContracts=daysElapsed>0?Math.round(safeDiv(combinedContracts,daysElapsed)*PACE_TOTAL_DAYS):0;
+  const paceStatus=combinedContracts>=GOAL_CONTRACTS?'DONE':projectedContracts>=GOAL_CONTRACTS?'ON TRACK':'BEHIND';
+  const paceColor=paceStatus==='DONE'?'var(--green)':paceStatus==='ON TRACK'?'var(--gold)':'var(--red)';
+  const paceProgress=Math.min(100,safeDiv(combinedContracts,GOAL_CONTRACTS)*100);
+
+  // WCL diagnostic
+  function wclDiagnostic(){
+    if(pRec===0)return null;
+    if(offerRate<settings.offerRateFloor&&pQual>0)return{color:'var(--red)',bg:'var(--red-faint)',border:'var(--red-border)',title:'OFFER DISCIPLINE',msg:`${Math.round(offerRate)}% offer rate — target is ${settings.offerRateFloor}%. Every qualified lead needs an offer.`};
+    if(accRate<40&&pRec>=10)return{color:'var(--gold)',bg:'var(--gold-faint)',border:'var(--gold-border)',title:'LIST QUALITY',msg:`Acceptance rate ${Math.round(accRate)}% — check targeting filters and list criteria.`};
+    if(qualRate<20&&pAcc>=5)return{color:'var(--gold)',bg:'var(--gold-faint)',border:'var(--gold-border)',title:'QUALIFICATION RATE',msg:`Only ${Math.round(qualRate)}% of accepted leads qualify. Review pre-qualification criteria.`};
+    return{color:'var(--green)',bg:'var(--green-faint)',border:'var(--green-border)',title:'✓ PIPELINE HEALTHY',msg:'WCL metrics are in range. Maintain volume.'};
+  }
+  const wclDiag=wclDiagnostic();
+
+  // SMS per-campaign stats
   function campStats(camp){
     const entries=smsEntries.filter(e=>e.campaignId===camp.id);
-    const totalSent=entries.reduce((s,e)=>s+toN(e.sent),0);
-    const totalLand=entries.reduce((s,e)=>s+toN(e.landlines),0);
-    const totalOpt=entries.reduce((s,e)=>s+toN(e.optOuts),0);
-    const deliv=totalSent-totalLand-totalOpt;
-    const replies=entries.reduce((s,e)=>s+toN(e.replies),0);
-    const cConvos=entries.reduce((s,e)=>s+toN(e.conversations),0);
-    const cQual=entries.reduce((s,e)=>s+toN(e.qualified),0);
-    const cOffers=entries.reduce((s,e)=>s+toN(e.offersMade),0);
-    const cResp=entries.reduce((s,e)=>s+toN(e.offerResponses),0);
-    const cContracts=entries.reduce((s,e)=>s+toN(e.contracts),0);
-    const planned=toN(camp.dailySend)*toN(camp.duration);
-    const costN=toN(camp.cost);
-    return{totalSent,deliv,replies,cConvos,cQual,cOffers,cResp,cContracts,planned,
-      costPerReply:replies>0?(costN/replies).toFixed(2):null,
-      costPerContract:cContracts>0?(costN/cContracts).toFixed(0):null,
-      delivRate:pct(deliv,totalSent),replyRate:pct(replies,deliv),convoRate:pct(cConvos,replies),
-      qualRate:pct(cQual,cConvos),offerRate:pct(cOffers,cQual),respRate:pct(cResp,cOffers),contractRate:pct(cContracts,cResp)};
+    const daysActive=entries.filter(e=>toN(e.sent)>0).length;
+    const totSent=entries.reduce((s,e)=>s+toN(e.sent),0);
+    const totTotalReplies=entries.reduce((s,e)=>s+toN(e.totalReplies),0);
+    const totIntReplies=entries.reduce((s,e)=>s+toN(e.interestedReplies),0);
+    const totOptouts=entries.reduce((s,e)=>s+toN(e.optouts),0);
+    const totConvos=entries.reduce((s,e)=>s+toN(e.conversations),0);
+    const totQual=entries.reduce((s,e)=>s+toN(e.qualified),0);
+    const totOffers=entries.reduce((s,e)=>s+toN(e.offers),0);
+    const totContracts=entries.reduce((s,e)=>s+toN(e.contracts),0);
+    const totClosed=entries.reduce((s,e)=>s+toN(e.closed),0);
+    const totCost=entries.reduce((s,e)=>s+toN(e.cost),0);
+    const intRate=safePct(totIntReplies,totTotalReplies);
+    const convoRate=safePct(totConvos,totIntReplies);
+    const sQualRate=safePct(totQual,totConvos);
+    const sOfferRate=safePct(totOffers,totQual);
+    const costPerContract=totContracts>0?safeDiv(totCost,totContracts):null;
+
+    // Diagnostic
+    let diag=null;
+    if(daysActive>=settings.diagnosticMinDays&&totSent>0){
+      if(intRate<settings.interestedReplyFloor)diag={color:'var(--red)',title:'LOW INTEREST RATE',msg:`${Math.round(intRate*10)/10}% interested replies — floor is ${settings.interestedReplyFloor}%. Improve message copy or targeting.`};
+      else if(sOfferRate<settings.offerRateFloor&&totQual>0)diag={color:'var(--gold)',title:'OFFER DISCIPLINE',msg:`${Math.round(sOfferRate)}% offer rate — send offers to all qualified leads.`};
+      else diag={color:'var(--green)',title:'✓ SMS CAMPAIGN HEALTHY',msg:'Metrics in range.'};
+    }
+    return{daysActive,totSent,totTotalReplies,totIntReplies,totOptouts,totConvos,totQual,totOffers,totContracts,totClosed,totCost,intRate,convoRate,sQualRate,sOfferRate,costPerContract,diag};
   }
 
-  // 90-Day Pace
-  const totalSMSContracts=activeSmsEntries.reduce((s,e)=>s+toN(e.contracts),0);
-  const nowDate=new Date();
-  const daysLeft=Math.max(0,Math.ceil((PACE_END-nowDate)/86400000));
-  const daysElapsed=Math.max(0,Math.floor((nowDate-PACE_START)/86400000));
-  const combinedContracts=totalContracts+totalSMSContracts;
-  const onPace=daysElapsed>0?(combinedContracts/daysElapsed*PACE_TOTAL_DAYS)>=GOAL_CONTRACTS:false;
-  const paceStatus=combinedContracts>=GOAL_CONTRACTS?'DONE':onPace?'ON TRACK':'BEHIND';
-  const paceColor=paceStatus==='DONE'?'var(--green)':paceStatus==='ON TRACK'?'var(--gold)':'var(--red)';
+  // Combined tab totals
+  const combWcl={rec:wclEntries.reduce((s,e)=>s+toN(e.received),0),acc:wclEntries.reduce((s,e)=>s+toN(e.accepted),0),qual:wclEntries.reduce((s,e)=>s+toN(e.qualified),0),off:wclEntries.reduce((s,e)=>s+toN(e.offers),0),con:wclEntries.reduce((s,e)=>s+toN(e.contracts),0),cls:wclEntries.reduce((s,e)=>s+toN(e.closed),0)};
+  const combSms={sent:smsEntries.reduce((s,e)=>s+toN(e.sent),0),int:smsEntries.reduce((s,e)=>s+toN(e.interestedReplies),0),conv:smsEntries.reduce((s,e)=>s+toN(e.conversations),0),qual:smsEntries.reduce((s,e)=>s+toN(e.qualified),0),off:smsEntries.reduce((s,e)=>s+toN(e.offers),0),con:smsEntries.reduce((s,e)=>s+toN(e.contracts),0),cls:smsEntries.reduce((s,e)=>s+toN(e.closed),0)};
+  const totalReach=combWcl.rec+combSms.sent;
+  const totalConv=combWcl.acc+combSms.int;
+  const totalContracts=combWcl.con+combSms.con;
+  const totalClosed=combWcl.cls+combSms.cls;
 
   const p=isMobile?16:24;
 
-  const funnelRows=[
-    {l:'Leads Received',  num:pRec, rate:null},
-    {l:'Leads Accepted',  num:pAcc, rate:accRate, low:60, high:75},
-    {l:'Qualified',       num:pQual, rate:qualRate, low:30, high:40},
-    {l:'Offers Made',     num:pOffers, rate:offerRate, low:90, high:100},
-    {l:'Offer Responses', num:pResp, rate:respRate, low:25, high:35},
-    {l:'Contracts',       num:pContracts, rate:contractRate, low:15, high:25},
-    {l:'Closed',          num:pClosed, rate:closedRate, low:80, high:100},
-  ];
-
-  const activeCamps=campaigns.filter(c=>c.status==='active');
-  const pausedCamps=campaigns.filter(c=>c.status==='paused');
-  const archivedCamps=campaigns.filter(c=>c.status==='archived');
-
-  // 14-day calendar strip dates
-  const calDates=[];
-  for(let i=13;i>=0;i--){
-    const d=new Date();
-    d.setDate(d.getDate()-i);
-    calDates.push(d.toISOString().slice(0,10));
+  if(!initialized){
+    return <WipeGate onInitialized={()=>{setInitialized(true);loadData();}}/>;
   }
-  const DAY_ABBR=['Su','Mo','Tu','We','Th','Fr','Sa'];
 
-  function CampaignCard({camp}){
-    const stats=campStats(camp);
-    const cc=camp.color&&camp.color.startsWith('var')?camp.color:'var(--gold)';
-    const isActive=camp.status==='active';
-    const isPaused=camp.status==='paused';
-    const isArchived=camp.status==='archived';
-    const campEntries=smsEntries.filter(e=>e.campaignId===camp.id).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
-
-    // Card-level UI state
-    const [showLogForm,setShowLogForm]=useState(false);
-    const [showViewLogs,setShowViewLogs]=useState(false);
-    const [showDeletePin,setShowDeletePin]=useState(false);
-    const [deletePinVal,setDeletePinVal]=useState('');
-    const [deletePinErr,setDeletePinErr]=useState('');
-    const pinRef=useRef(null);
-    useEffect(()=>{if(showDeletePin&&pinRef.current)pinRef.current.focus();},[showDeletePin]);
-
-    // Log form state (inside card)
-    const [logDate,setLogDate]=useState(todayISO());
-    const [logSent,setLogSent]=useState('');
-    const [logLandlines,setLogLandlines]=useState('');
-    const [logOptOuts,setLogOptOuts]=useState('');
-    const [logReplies,setLogReplies]=useState('');
-    const [logConvos,setLogConvos]=useState('');
-    const [logQualified,setLogQualified]=useState('');
-    const [logOffers,setLogOffers]=useState('');
-    const [logResponses,setLogResponses]=useState('');
-    const [logContracts,setLogContracts]=useState('');
-    const [logToast,setLogToast]=useState('');
-    const [logSaving,setLogSaving]=useState(false);
-
-    // Inline edit log state
-    const [editLogId,setEditLogId]=useState(null);
-    const [editLogData,setEditLogData]=useState({});
-
-    // Today's entry for this campaign
-    const todayCampEntry=campEntries.find(e=>e.date===todayISO());
-
-    // Live rate calcs from form
-    const lSent=toN(logSent),lLand=toN(logLandlines),lOpt=toN(logOptOuts);
-    const lDeliv=Math.max(0,lSent-lLand-lOpt);
-    const lReplies=toN(logReplies),lConvos=toN(logConvos),lQual=toN(logQualified);
-    const lOffers=toN(logOffers),lResp=toN(logResponses),lCon=toN(logContracts);
-    const lDelivRate=pct(lDeliv,lSent),lReplyRate=pct(lReplies,lDeliv),lConvoRate=pct(lConvos,lReplies);
-    const lQualRate=pct(lQual,lConvos),lOfferRate=pct(lOffers,lQual),lRespRate=pct(lResp,lOffers),lConRate=pct(lCon,lResp);
-
-    function resetLogForm(){setLogSent('');setLogLandlines('');setLogOptOuts('');setLogReplies('');setLogConvos('');setLogQualified('');setLogOffers('');setLogResponses('');setLogContracts('');}
-
-    async function saveLog(){
-      setLogSaving(true);
-      const existing=campEntries.find(e=>e.date===logDate);
-      const body={campaignId:camp.id,date:logDate,sent:logSent,landlines:logLandlines,optOuts:logOptOuts,replies:logReplies,conversations:logConvos,qualified:logQualified,offersMade:logOffers,offerResponses:logResponses,contracts:logContracts};
-      if(existing){
-        const res=await fetch(`/api/kpi/sms/${existing.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        if(res.ok){const d=await res.json();setSmsEntries(es=>es.map(e=>e.id===existing.id?d:e));}
-      } else {
-        const res=await fetch('/api/kpi/sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-        if(res.ok){const d=await res.json();setSmsEntries(es=>[...es,d]);}
-      }
-      resetLogForm();
-      setLogToast(existing?'✓ Updated!':'✓ Saved!');
-      setTimeout(()=>setLogToast(''),2200);
-      setLogSaving(false);
-    }
-
-    async function confirmDel(){
-      if(deletePinVal!=='2608'){setDeletePinErr('Incorrect PIN');setDeletePinVal('');if(pinRef.current)pinRef.current.focus();return;}
-      const res=await fetch(`/api/kpi/campaigns/${camp.id}`,{method:'DELETE'});
-      if(res.ok){setCampaigns(cs=>cs.filter(c=>c.id!==camp.id));setSmsEntries(es=>es.filter(e=>e.campaignId!==camp.id));}
-      else setDeletePinErr('Delete failed.');
-    }
-
-    async function saveEditLog(){
-      const res=await fetch(`/api/kpi/sms/${editLogId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(editLogData)});
-      if(res.ok){const d=await res.json();setSmsEntries(es=>es.map(e=>e.id===editLogId?d:e));}
-      setEditLogId(null);setEditLogData({});
-    }
-
-    async function deleteLog(id){
-      const res=await fetch(`/api/kpi/sms/${id}`,{method:'DELETE'});
-      if(res.ok)setSmsEntries(es=>es.filter(e=>e.id!==id));
-    }
-
-    // Weekly totals grouped by Mon-Sun
-    const weeklyMap={};
-    campEntries.forEach(e=>{
-      const ws=getWeekStart(e.date);
-      if(!weeklyMap[ws])weeklyMap[ws]={sent:0,replies:0,qualified:0,contracts:0,count:0};
-      weeklyMap[ws].sent+=toN(e.sent);weeklyMap[ws].replies+=toN(e.replies);
-      weeklyMap[ws].qualified+=toN(e.qualified);weeklyMap[ws].contracts+=toN(e.contracts);weeklyMap[ws].count++;
-    });
-    const weeklyRows=Object.entries(weeklyMap).sort((a,b)=>b[0].localeCompare(a[0]));
-
-    const campRates=[
-      {l:'Deliverability',r:stats.delivRate,low:65,high:75},
-      {l:'Reply Rate',r:stats.replyRate,low:2,high:5},
-      {l:'Conversation Rate',r:stats.convoRate,low:40,high:60},
-      {l:'Qualification Rate',r:stats.qualRate,low:30,high:40},
-      {l:'Offer Rate',r:stats.offerRate,low:90,high:100},
-      {l:'Response Rate',r:stats.respRate,low:25,high:35},
-      {l:'Contract Rate',r:stats.contractRate,low:15,high:25},
-    ];
-
-    return(
-      <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:`4px solid ${cc}`,borderRadius:14,padding:'20px 24px',marginBottom:14}}>
-
-        {/* Header */}
-        <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:10,marginBottom:14}}>
-          <div style={{flex:1}}>
-            <div style={{fontSize:16,fontWeight:800,color:'var(--text)',marginBottom:6}}>{camp.name}</div>
-            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-              {camp.county&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text2)',border:'1px solid var(--border)'}}>{camp.county}</span>}
-              {camp.filterStack&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text2)',border:'1px solid var(--border)'}}>{camp.filterStack}</span>}
-              {isActive&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--green-faint)',color:'var(--green)',border:'1px solid var(--green-border)',fontWeight:700}}>ACTIVE</span>}
-              {isPaused&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text2)',border:'1px solid var(--border)',fontWeight:700}}>PAUSED</span>}
-              {isArchived&&<span style={{fontSize:11,padding:'2px 8px',borderRadius:4,background:'var(--surface3)',color:'var(--text3)',border:'1px solid var(--border)',fontWeight:700}}>ARCHIVED</span>}
-            </div>
-          </div>
+  return(
+    <div style={{maxWidth:900,margin:'0 auto',padding:`${p}px ${p}px 80px`}}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:10}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--gold)',marginBottom:4}}>KPI Tracker</div>
+          <div style={{fontSize:isMobile?20:26,fontWeight:900,color:'var(--text)'}}>Performance Dashboard</div>
         </div>
+        <button onClick={()=>router.push('/kpi/calendar')} style={{...BTN2,display:'flex',alignItems:'center',gap:6,fontSize:13,minHeight:38}}>
+          📅 Calendar
+        </button>
+      </div>
 
-        {/* TODAY section */}
-        {todayCampEntry&&(
-          <div style={{marginBottom:14,padding:'12px 14px',borderRadius:10,background:'var(--surface3)',border:`1px solid ${cc}33`}}>
-            <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:cc,marginBottom:8}}>TODAY</div>
-            <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-              {[{l:'Sent',v:todayCampEntry.sent},{l:'Replies',v:todayCampEntry.replies},{l:'Qualified',v:todayCampEntry.qualified},{l:'Contracts',v:todayCampEntry.contracts}].map(({l,v})=>toN(v)>0&&(
-                <div key={l} style={{textAlign:'center',padding:'6px 10px',borderRadius:6,background:'var(--surface2)'}}>
-                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:800,color:'var(--text)'}}>{fmtNum(toN(v))}</div>
-                  <div style={{fontSize:10,color:'var(--text3)',marginTop:1}}>{l}</div>
-                </div>
+      {/* Toast */}
+      {toast&&<div style={{padding:'10px 16px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)',color:'var(--text2)',fontSize:14,marginBottom:14,fontWeight:600}}>{toast}</div>}
+
+      {/* Tab Bar */}
+      <div style={{display:'flex',borderBottom:'1px solid var(--border)',marginBottom:20,overflowX:'auto'}}>
+        {['WCL','SMS Campaigns','Combined'].map(t=>(
+          <button key={t} onClick={()=>setMainTab(t)} style={{padding:'10px 18px',background:'none',border:'none',borderBottom:mainTab===t?'2px solid var(--gold)':'2px solid transparent',color:mainTab===t?'var(--gold)':'var(--text3)',fontSize:14,fontWeight:mainTab===t?700:500,cursor:'pointer',whiteSpace:'nowrap',transition:'color 0.15s'}}>{t}</button>
+        ))}
+      </div>
+
+      {/* ═══ WCL TAB ═══ */}
+      {mainTab==='WCL'&&(
+        <div>
+          {/* Period selector + Log button */}
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:16,flexWrap:'wrap'}}>
+            <div style={{display:'flex',gap:4,background:'var(--surface2)',borderRadius:10,padding:4,border:'1px solid var(--border)'}}>
+              {['Daily','Weekly','Monthly'].map(p2=>(
+                <button key={p2} onClick={()=>setPeriod(p2)} style={{padding:'6px 14px',borderRadius:8,border:'none',background:period===p2?'var(--surface)':'transparent',color:period===p2?'var(--gold)':'var(--text3)',fontWeight:period===p2?700:500,fontSize:13,cursor:'pointer',transition:'all 0.15s'}}>{p2}</button>
               ))}
             </div>
+            <div style={{flex:1}}/>
+            <button onClick={()=>openWclForm()} style={{...BTN,minHeight:38,fontSize:13}}>+ Log Day</button>
           </div>
-        )}
 
-        {/* Progress bar */}
-        {stats.planned>0&&(
-          <div style={{marginBottom:14}}>
-            <div style={{display:'flex',justifyContent:'space-between',fontSize:12,color:'var(--text3)',marginBottom:6}}>
-              <span>Sent: {stats.totalSent.toLocaleString()} of {stats.planned.toLocaleString()}</span>
-              <span>{pct(stats.totalSent,stats.planned)}%</span>
-            </div>
-            <div style={{height:8,borderRadius:4,background:'var(--surface3)',overflow:'hidden'}}>
-              <div style={{height:'100%',borderRadius:4,width:`${Math.min(100,pct(stats.totalSent,stats.planned))}%`,background:cc}}/>
-            </div>
-          </div>
-        )}
-
-        {/* ALL TIME TOTALS */}
-        <div style={{marginBottom:14}}>
-          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>All Time Totals</div>
-          <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-            {[{l:'Sent',v:stats.totalSent,c:'var(--text)'},{l:'Replies',v:stats.replies,c:'var(--cyan)'},{l:'Qualified',v:stats.cQual,c:'var(--gold)'},{l:'Contracts',v:stats.cContracts,c:'var(--green)'}].map(({l,v,c})=>(
-              <div key={l} style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:68}}>
-                <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:c}}>{fmtNum(v)}</div>
-                <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{l}</div>
+          {/* Log Form */}
+          {showLogForm&&(
+            <div style={{...CARD,border:'1px solid var(--gold-border)',background:'var(--surface2)',marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+                <div style={{fontSize:15,fontWeight:800,color:'var(--text)'}}>{editWclId?'Edit':'Log'} WCL Entry</div>
+                <button onClick={()=>setShowLogForm(false)} style={{background:'none',border:'none',color:'var(--text3)',fontSize:22,cursor:'pointer',lineHeight:1}}>×</button>
               </div>
-            ))}
-            {stats.costPerReply&&<div style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:68}}><div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--text)'}}>{'$'+stats.costPerReply}</div><div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>$/Reply</div></div>}
-            {stats.costPerContract&&<div style={{textAlign:'center',padding:'10px 14px',borderRadius:8,background:'var(--surface3)',minWidth:68}}><div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--green)'}}>{'$'+Number(stats.costPerContract).toLocaleString()}</div><div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>$/Contract</div></div>}
-          </div>
-        </div>
 
-        {/* RATES */}
-        <div style={{marginBottom:14}}>
-          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>Rates</div>
-          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-            {campRates.map(({l,r,low,high})=>{
-              const color=r>=high?'var(--gold)':r>=low?'var(--green)':'var(--red)';
-              const arrow=r>=high?'↑':r>=low?'✓':'↓';
-              return(
-                <div key={l} style={{padding:'5px 9px',borderRadius:7,background:color+'18',border:`1px solid ${color}40`,display:'flex',alignItems:'center',gap:5}}>
-                  <span style={{fontSize:10,color:'var(--text3)'}}>{l}</span>
-                  <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,fontWeight:800,color}}>{r}% {arrow}</span>
+              <div style={{marginBottom:14}}>
+                <label style={LBL}>Date</label>
+                <input style={{...INPUT,maxWidth:180}} type="date" value={wclDate} onChange={e=>setWclDate(e.target.value)}/>
+              </div>
+
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:12,marginBottom:14}}>
+                <div>
+                  <label style={LBL}>Received</label>
+                  <NInput id="wcl-first" value={received} onChange={setReceived} autoFocus/>
                 </div>
-              );
-            })}
-          </div>
-        </div>
+                <div>
+                  <label style={LBL}>Accepted</label>
+                  <NInput value={accepted} onChange={setAccepted}/>
+                  {fRec>0&&fAcc>=0&&<div style={{fontSize:12,color:'var(--text3)',marginTop:4}}>Rejected: {fRejected} ({fRejPct}%)</div>}
+                </div>
+                <div>
+                  <label style={LBL}>Conversations</label>
+                  <NInput value={conversations} onChange={setConversations}/>
+                </div>
+                <div>
+                  <label style={LBL}>Qualified</label>
+                  <NInput value={qualified} onChange={setQualified}/>
+                  {fQual>0&&<div style={{fontSize:12,color:'var(--gold)',fontWeight:700,marginTop:4}}>Target: {fQual} offer(s) must go out</div>}
+                </div>
+              </div>
 
-        {/* Button row: LOG TODAY / VIEW ALL LOGS / PAUSE / DELETE */}
-        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
-          {isActive&&(
-            <button onClick={()=>{setShowLogForm(f=>!f);setShowViewLogs(false);}} style={{padding:'8px 16px',borderRadius:8,border:'none',background:showLogForm?'var(--surface3)':cc,color:showLogForm?'var(--text2)':'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>
-              {showLogForm?'Close Form':'Log Today'}
-            </button>
-          )}
-          {campEntries.length>0&&(
-            <button onClick={()=>{setShowViewLogs(f=>!f);setShowLogForm(false);}} style={{padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:showViewLogs?'var(--surface2)':'transparent',color:showViewLogs?'var(--text)':'var(--text2)',fontWeight:600,fontSize:13,cursor:'pointer'}}>
-              {showViewLogs?'Hide Logs':`View All Logs (${campEntries.length})`}
-            </button>
-          )}
-          {isActive&&<button onClick={()=>pauseCampaign(camp.id)} style={{padding:'8px 14px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',fontSize:12,cursor:'pointer',fontWeight:500}}>Pause</button>}
-          {isPaused&&<button onClick={()=>resumeCampaign(camp.id)} style={{padding:'8px 16px',borderRadius:8,border:'none',background:cc,color:'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>Resume</button>}
-          {isPaused&&<button onClick={()=>archiveCampaign(camp.id)} style={{padding:'8px 14px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',fontSize:12,cursor:'pointer'}}>Archive</button>}
-          {/* Inline PIN delete */}
-          {!showDeletePin?(
-            <button onClick={()=>{if(isArchived){fetch(`/api/kpi/campaigns/${camp.id}`,{method:'DELETE'}).then(r=>{if(r.ok){setCampaigns(cs=>cs.filter(c=>c.id!==camp.id));setSmsEntries(es=>es.filter(e=>e.campaignId!==camp.id));}});}else setShowDeletePin(true);}} style={{padding:'8px 14px',borderRadius:8,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',fontSize:12,fontWeight:600,cursor:'pointer',marginLeft:'auto'}}>Delete</button>
-          ):(
-            <div style={{display:'flex',alignItems:'center',gap:6,marginLeft:'auto',flexWrap:'wrap'}}>
-              <input ref={pinRef} type="password" inputMode="numeric" maxLength={4} value={deletePinVal} onChange={e=>setDeletePinVal(e.target.value.replace(/\D/g,'').slice(0,4))} onKeyDown={e=>{if(e.key==='Enter')confirmDel();if(e.key==='Escape'){setShowDeletePin(false);setDeletePinVal('');setDeletePinErr('');}}} placeholder="PIN" style={{width:90,height:36,textAlign:'center',letterSpacing:'0.3em',fontFamily:'JetBrains Mono,monospace',fontSize:16,fontWeight:700,borderRadius:7,background:'var(--surface3)',border:`1px solid ${deletePinErr?'var(--red)':'var(--border)'}`,color:'var(--text)',outline:'none',boxSizing:'border-box'}}/>
-              {deletePinErr&&<span style={{fontSize:11,color:'var(--red)'}}>{deletePinErr}</span>}
-              <button onClick={confirmDel} style={{padding:'6px 12px',borderRadius:6,border:'none',background:'var(--red)',color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer'}}>Confirm</button>
-              <button onClick={()=>{setShowDeletePin(false);setDeletePinVal('');setDeletePinErr('');}} style={{padding:'6px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text2)',fontSize:12,cursor:'pointer'}}>Cancel</button>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(3,1fr)',gap:12,marginBottom:14}}>
+                <div>
+                  <label style={LBL}>Offers Made</label>
+                  <NInput value={offers} onChange={setOffers}/>
+                </div>
+                <div>
+                  <label style={LBL}>Contracts</label>
+                  <NInput value={contracts} onChange={setContracts}/>
+                </div>
+                <div>
+                  <label style={LBL}>Closed</label>
+                  <NInput value={closedW} onChange={setClosedW}/>
+                </div>
+              </div>
+
+              {/* Rejection reasons */}
+              {toN(received)>0&&toN(accepted)<toN(received)&&(
+                <div style={{marginBottom:14}}>
+                  <label style={LBL}>Rejection Reasons</label>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
+                    {REJ_REASONS.map(r=>(
+                      <button key={r} onClick={()=>setRejReasons(x=>x.includes(r)?x.filter(y=>y!==r):[...x,r])} style={{padding:'5px 12px',borderRadius:20,border:`1px solid ${rejReasons.includes(r)?'var(--gold)':'var(--border)'}`,background:rejReasons.includes(r)?'var(--gold-faint)':'var(--surface3)',color:rejReasons.includes(r)?'var(--gold)':'var(--text3)',fontSize:12,cursor:'pointer',fontWeight:rejReasons.includes(r)?700:400}}>{r}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+                <button onClick={saveWcl} disabled={savingWcl} style={{...BTN,flex:1,opacity:savingWcl?0.7:1}}>{savingWcl?'Saving…':editWclId?'Update Entry':'Save Entry'}</button>
+                <button onClick={()=>setShowLogForm(false)} style={{...BTN2}}>Done</button>
+              </div>
             </div>
           )}
-        </div>
 
-        {/* LOG TODAY form */}
-        {isActive&&showLogForm&&(
-          <div style={{marginTop:14,padding:'16px',borderRadius:10,background:'var(--surface3)',border:`1px solid ${cc}44`}}>
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
-              <div style={{fontSize:12,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em'}}>Log Day — {camp.name}</div>
-              {logToast&&<span style={{fontSize:12,fontWeight:700,color:'var(--green)',padding:'3px 10px',borderRadius:6,background:'var(--green-faint)',border:'1px solid var(--green-border)'}}>{logToast}</span>}
+          {/* Funnel stats */}
+          <div style={CARD}>
+            <div style={{fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14}}>{period} Funnel</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:10,marginBottom:14}}>
+              <Stat label="Received" value={pRec}/>
+              <Stat label="Accepted" value={pAcc} sub={pRec>0?fmtPct(accRate):null} color={accRate>=60?'var(--green)':accRate>=40?'var(--gold)':'var(--red)'}/>
+              <Stat label="Convos" value={pConv}/>
+              <Stat label="Qualified" value={pQual} sub={pAcc>0?fmtPct(qualRate):null}/>
+              <Stat label="Offers" value={pOff} sub={pQual>0?fmtPct(offerRate):null} color={offerRate>=90?'var(--green)':offerRate>=70?'var(--gold)':'var(--red)'}/>
+              <Stat label="Contracts" value={pCon} sub={pOff>0?fmtPct(contractRate):null}/>
+              <Stat label="Closed" value={pCls}/>
             </div>
-            {campEntries.find(e=>e.date===logDate)&&(
-              <div style={{marginBottom:10,padding:'6px 10px',borderRadius:6,background:'var(--gold-faint)',border:'1px solid var(--gold-border)',fontSize:12,color:'var(--gold)',fontWeight:600}}>Entry exists for this date — saving will update it.</div>
+            {wclDiag&&(
+              <div style={{padding:'12px 14px',borderRadius:10,background:wclDiag.bg,border:`1px solid ${wclDiag.border}`,color:wclDiag.color}}>
+                <div style={{fontWeight:800,fontSize:12,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:4}}>{wclDiag.title}</div>
+                <div style={{fontSize:13}}>{wclDiag.msg}</div>
+              </div>
             )}
-            <div style={{marginBottom:12}}><DatePicker label="Date" value={logDate} onChange={setLogDate}/></div>
-            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(3,1fr)',gap:10}}>
-              {[{l:'Sent',v:logSent,set:setLogSent},{l:'Landlines',v:logLandlines,set:setLogLandlines},{l:'Opt-Outs',v:logOptOuts,set:setLogOptOuts}].map(({l,v,set})=>(
-                <div key={l}><label style={LBL}>{l}</label><input style={INPUT} type="text" inputMode="numeric" value={v} onChange={e=>set(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
-              ))}
-              <div><label style={LBL}>Deliverable (auto)</label><div style={{minHeight:48,padding:'12px 16px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',color:'var(--cyan)',fontSize:15,display:'flex',alignItems:'center'}}>{lDeliv.toLocaleString()}</div></div>
-              {[{l:'Replies',v:logReplies,set:setLogReplies},{l:'Conversations',v:logConvos,set:setLogConvos},{l:'Qualified',v:logQualified,set:setLogQualified},{l:'Offers Made',v:logOffers,set:setLogOffers},{l:'Offer Responses',v:logResponses,set:setLogResponses},{l:'Contracts',v:logContracts,set:setLogContracts}].map(({l,v,set})=>(
-                <div key={l}><label style={LBL}>{l}</label><input style={INPUT} type="text" inputMode="numeric" value={v} onChange={e=>set(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)'}/></div>
-              ))}
+          </div>
+
+          {/* Weekly summary */}
+          {weeks.length>0&&(
+            <div style={CARD}>
+              <div style={{fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14}}>Weekly Summary</div>
+              <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:10}}>
+                {bestWeek&&<div style={{padding:'10px 14px',borderRadius:10,background:'var(--gold-faint)',border:'1px solid var(--gold-border)',flex:1,minWidth:140}}>
+                  <div style={{fontSize:11,color:'var(--gold)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Best Week</div>
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:14,color:'var(--text)',fontWeight:700}}>{bestWeek.week}</div>
+                  <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>{bestWeek.qual} qualified · {bestWeek.off} offers · {bestWeek.con} contracts</div>
+                </div>}
+                {worstWeek&&worstWeek.week!==bestWeek?.week&&<div style={{padding:'10px 14px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--border)',flex:1,minWidth:140}}>
+                  <div style={{fontSize:11,color:'var(--text3)',fontWeight:700,textTransform:'uppercase',marginBottom:4}}>Needs Improvement</div>
+                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:14,color:'var(--text)',fontWeight:700}}>{worstWeek.week}</div>
+                  <div style={{fontSize:12,color:'var(--text2)',marginTop:2}}>{worstWeek.qual} qualified · {worstWeek.off} offers · {worstWeek.con} contracts</div>
+                </div>}
+              </div>
             </div>
-            {/* Live rate pills */}
-            {lSent>0&&(
-              <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:10}}>
-                {[{l:'Deliv',r:lDelivRate,low:65,high:75},{l:'Reply',r:lReplyRate,low:2,high:5},{l:'Convo',r:lConvoRate,low:40,high:60},{l:'Qual',r:lQualRate,low:30,high:40},{l:'Offer',r:lOfferRate,low:90,high:100},{l:'Resp',r:lRespRate,low:25,high:35},{l:'Contract',r:lConRate,low:15,high:25}].filter(({r})=>r>0).map(({l,r,low,high})=>{
-                  const color=r>=high?'var(--gold)':r>=low?'var(--green)':'var(--red)';
-                  return <span key={l} style={{fontSize:11,padding:'3px 8px',borderRadius:5,background:color+'18',color,border:`1px solid ${color}40`,fontFamily:'JetBrains Mono,monospace',fontWeight:700}}>{l}: {r}%</span>;
+          )}
+
+          <EntryLog wclEntries={wclEntries} onEdit={openWclForm} onDelete={deleteWcl}/>
+        </div>
+      )}
+
+      {/* ═══ SMS CAMPAIGNS TAB ═══ */}
+      {mainTab==='SMS Campaigns'&&(
+        <div>
+          <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap'}}>
+            <button onClick={()=>setShowCampForm(f=>!f)} style={{...BTN2,fontSize:13,minHeight:38}}>{showCampForm?'✕ Cancel':'+ New Campaign'}</button>
+            <button onClick={()=>openSmsForm(null,'')} style={{...BTN,fontSize:13,minHeight:38}}>+ Log SMS Day</button>
+          </div>
+
+          {/* New Campaign Form */}
+          {showCampForm&&(
+            <div style={{...CARD,border:'1px solid var(--gold-border)',marginBottom:16}}>
+              <div style={{fontSize:15,fontWeight:800,color:'var(--text)',marginBottom:14}}>New Campaign</div>
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12,marginBottom:12}}>
+                <div>
+                  <label style={LBL}>Campaign Name</label>
+                  <input style={INPUT} value={campName} onChange={e=>setCampName(e.target.value)} placeholder="e.g. Broward Absentee May"/>
+                </div>
+                <div>
+                  <label style={LBL}>County</label>
+                  <input style={INPUT} value={campCounty} onChange={e=>setCampCounty(e.target.value)} placeholder="e.g. Broward"/>
+                </div>
+                <div>
+                  <label style={LBL}>List Type</label>
+                  <select style={{...INPUT,height:48}} value={campListType} onChange={e=>setCampListType(e.target.value)}>
+                    {LIST_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={LBL}>Total Contacts</label>
+                  <NInput value={campContacts} onChange={setCampContacts} placeholder="0"/>
+                </div>
+                <div>
+                  <label style={LBL}>Start Date</label>
+                  <input style={{...INPUT,maxWidth:'100%'}} type="date" value={campStart} onChange={e=>setCampStart(e.target.value)}/>
+                </div>
+              </div>
+              <button onClick={createCampaign} disabled={savingCamp} style={{...BTN,opacity:savingCamp?0.7:1}}>{savingCamp?'Creating…':'Create Campaign'}</button>
+            </div>
+          )}
+
+          {/* SMS Log Form */}
+          {showSmsForm&&(
+            <div style={{...CARD,border:'1px solid var(--purple-border,rgba(167,139,250,0.4))',background:'var(--surface2)',marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+                <div style={{fontSize:15,fontWeight:800,color:'var(--text)'}}>{editSmsId?'Edit':'Log'} SMS Day</div>
+                <button onClick={()=>setShowSmsForm(false)} style={{background:'none',border:'none',color:'var(--text3)',fontSize:22,cursor:'pointer',lineHeight:1}}>×</button>
+              </div>
+
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12,marginBottom:12}}>
+                <div>
+                  <label style={LBL}>Campaign</label>
+                  <select style={{...INPUT,height:48}} value={smsCampaignId} onChange={e=>setSmsCampaignId(e.target.value)}>
+                    <option value="">Select campaign…</option>
+                    {campaigns.filter(c=>c.status!=='archived').map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={LBL}>Date</label>
+                  <input style={INPUT} type="date" value={smsDate} onChange={e=>setSmsDate(e.target.value)}/>
+                </div>
+              </div>
+
+              <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(3,1fr)',gap:12,marginBottom:12}}>
+                <div><label style={LBL}>Sent</label><NInput value={smsSent} onChange={setSmsSent}/></div>
+                <div><label style={LBL}>Total Replies</label><NInput value={smsTotalReplies} onChange={setSmsTotalReplies}/></div>
+                <div><label style={LBL}>Interested Replies</label><NInput value={smsIntReplies} onChange={setSmsIntReplies}/></div>
+                <div><label style={LBL}>Optouts</label><NInput value={smsOptouts} onChange={setSmsOptouts}/></div>
+                <div><label style={LBL}>Conversations</label><NInput value={smsConvos} onChange={setSmsConvos}/></div>
+                <div><label style={LBL}>Qualified</label><NInput value={smsQual} onChange={setSmsQual}/></div>
+                <div><label style={LBL}>Offers Made</label><NInput value={smsOffers} onChange={setSmsOffers}/></div>
+                <div><label style={LBL}>Contracts</label><NInput value={smsContracts} onChange={setSmsContracts}/></div>
+                <div><label style={LBL}>Closed</label><NInput value={smsClosed} onChange={setSmsClosed}/></div>
+              </div>
+
+              <div style={{marginBottom:14}}>
+                <label style={LBL}>Cost ($)</label>
+                <NInput value={smsCost} onChange={setSmsCost} style={{maxWidth:160}}/>
+              </div>
+
+              <div style={{display:'flex',gap:10}}>
+                <button onClick={saveSms} disabled={savingSms} style={{...BTN,flex:1,opacity:savingSms?0.7:1}}>{savingSms?'Saving…':editSmsId?'Update':'Save SMS Entry'}</button>
+                <button onClick={()=>setShowSmsForm(false)} style={BTN2}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {/* Campaign Cards */}
+          {campaigns.length===0&&!showCampForm&&(
+            <div style={{...CARD,textAlign:'center',color:'var(--text3)',fontSize:14,padding:40}}>No campaigns yet. Create one to start tracking SMS performance.</div>
+          )}
+
+          {['active','paused','archived'].map(statusGroup=>{
+            const groupCamps=campaigns.filter(c=>c.status===statusGroup);
+            if(groupCamps.length===0)return null;
+            return(
+              <div key={statusGroup}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:10,marginTop:statusGroup==='active'?0:16}}>{statusGroup} Campaigns</div>
+                {groupCamps.map(camp=>{
+                  const stats=campStats(camp);
+                  const cc=CAMP_COLORS[campaigns.indexOf(camp)%CAMP_COLORS.length];
+                  return(
+                    <div key={camp.id} style={{...CARD,border:`1px solid ${cc}40`,marginBottom:12}}>
+                      <div style={{display:'flex',alignItems:'flex-start',gap:12,marginBottom:14,flexWrap:'wrap'}}>
+                        <div style={{width:12,height:12,borderRadius:'50%',background:cc,marginTop:4,flexShrink:0}}/>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:16,fontWeight:800,color:'var(--text)'}}>{camp.name}</div>
+                          <div style={{fontSize:12,color:'var(--text3)',marginTop:3,display:'flex',gap:8,flexWrap:'wrap'}}>
+                            {camp.county&&<span>{camp.county}</span>}
+                            {camp.listType&&<span>· {camp.listType}</span>}
+                            {camp.startDate&&<span>· Started {camp.startDate}</span>}
+                            {camp.totalContacts>0&&<span>· {camp.totalContacts.toLocaleString()} contacts</span>}
+                          </div>
+                        </div>
+                        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                          {camp.status==='active'&&<button onClick={()=>setCampStatus(camp.id,'paused')} style={{...BTN2,minHeight:32,fontSize:12,padding:'0 10px'}}>Pause</button>}
+                          {camp.status==='paused'&&<button onClick={()=>setCampStatus(camp.id,'active')} style={{...BTN,minHeight:32,fontSize:12,padding:'0 10px'}}>Resume</button>}
+                          {camp.status!=='archived'&&<button onClick={()=>setCampStatus(camp.id,'archived')} style={{...BTN2,minHeight:32,fontSize:12,padding:'0 10px'}}>Archive</button>}
+                          <button onClick={()=>openSmsForm(null,camp.id)} style={{...BTN,minHeight:32,fontSize:12,padding:'0 10px',background:cc}}>+ Log Day</button>
+                          <button onClick={()=>deleteCampaign(camp.id)} style={{minHeight:32,padding:'0 10px',borderRadius:8,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',fontSize:12,cursor:'pointer',fontWeight:700}}>Delete</button>
+                        </div>
+                      </div>
+
+                      {/* Stats grid */}
+                      {stats.totSent>0&&(
+                        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(90px,1fr))',gap:8,marginBottom:12}}>
+                          <Stat label="Sent" value={stats.totSent.toLocaleString()}/>
+                          <Stat label="Total Replies" value={stats.totTotalReplies}/>
+                          <Stat label="Interested" value={stats.totIntReplies} sub={fmtPct(Math.round(stats.intRate))} color={stats.intRate>=settings.interestedReplyFloor?'var(--green)':'var(--red)'}/>
+                          <Stat label="Optouts" value={stats.totOptouts}/>
+                          <Stat label="Convos" value={stats.totConvos} sub={stats.totIntReplies>0?fmtPct(Math.round(stats.convoRate)):null}/>
+                          <Stat label="Qualified" value={stats.totQual}/>
+                          <Stat label="Offers" value={stats.totOffers}/>
+                          <Stat label="Contracts" value={stats.totContracts}/>
+                          {stats.totCost>0&&<Stat label="Cost" value={fmt$(stats.totCost)}/>}
+                          {stats.costPerContract&&<Stat label="$/Contract" value={fmt$(stats.costPerContract)}/>}
+                        </div>
+                      )}
+
+                      {/* Diagnostic */}
+                      {stats.diag&&(
+                        <div style={{padding:'10px 12px',borderRadius:8,background:stats.diag.color==='var(--green)'?'var(--green-faint)':stats.diag.color==='var(--gold)'?'var(--gold-faint)':'var(--red-faint)',border:`1px solid ${stats.diag.color==='var(--green)'?'var(--green-border)':stats.diag.color==='var(--gold)'?'var(--gold-border)':'var(--red-border)'}`,color:stats.diag.color,fontSize:13,marginBottom:6}}>
+                          <span style={{fontWeight:800,marginRight:8,textTransform:'uppercase',fontSize:11}}>{stats.diag.title}</span>{stats.diag.msg}
+                        </div>
+                      )}
+
+                      {/* Days active */}
+                      <div style={{fontSize:12,color:'var(--text3)',marginTop:4}}>{stats.daysActive} day(s) with sends</div>
+                    </div>
+                  );
                 })}
               </div>
-            )}
-            <button onClick={saveLog} disabled={logSaving} style={{marginTop:12,width:'100%',minHeight:46,borderRadius:10,border:'none',background:cc,color:'#000',fontWeight:800,fontSize:14,cursor:'pointer'}}>{logSaving?'Saving…':'Save Log'}</button>
-          </div>
-        )}
+            );
+          })}
 
-        {/* VIEW ALL LOGS panel */}
-        {showViewLogs&&campEntries.length>0&&(
-          <div style={{marginTop:14}}>
+          {/* SMS Entry Log */}
+          <SMSEntryLog entries={smsEntries} campaigns={campaigns} onEdit={e=>openSmsForm(e)} onDelete={deleteSms}/>
+        </div>
+      )}
 
-            {/* Section 1: Log table */}
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>Log Entries</div>
-              <div style={{borderRadius:8,overflow:'hidden',border:'1px solid var(--border)'}}>
-                <div style={{display:'grid',gridTemplateColumns:'90px 1fr auto',background:'var(--surface3)',padding:'8px 12px',gap:8}}>
-                  <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase'}}>Date</span>
-                  <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase'}}>Stats</span>
-                  <span style={{fontSize:11,fontWeight:700,color:'var(--text3)',textTransform:'uppercase'}}>Actions</span>
-                </div>
-                {campEntries.map(entry=>(
-                  <div key={entry.id}>
-                    {editLogId===entry.id?(
-                      <div style={{padding:'12px',borderBottom:'1px solid var(--border)',background:'var(--surface2)'}}>
-                        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:10}}>
-                          {['sent','landlines','optOuts','replies','conversations','qualified','offersMade','offerResponses','contracts'].map(field=>(
-                            <div key={field}><label style={{...LBL,marginBottom:4,fontSize:10}}>{field}</label>
-                              <input style={{...INPUT,minHeight:36,padding:'6px 10px',fontSize:13}} type="text" inputMode="numeric" value={editLogData[field]||''} onChange={e=>setEditLogData(d=>({...d,[field]:e.target.value.replace(/[^0-9]/g,'')}))}/>
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{display:'flex',gap:8}}>
-                          <button onClick={saveEditLog} style={{padding:'6px 14px',borderRadius:6,border:'none',background:'var(--green)',color:'#000',fontWeight:700,fontSize:13,cursor:'pointer'}}>Save</button>
-                          <button onClick={()=>{setEditLogId(null);setEditLogData({});}} style={{padding:'6px 14px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text2)',fontSize:13,cursor:'pointer'}}>Cancel</button>
-                        </div>
-                      </div>
-                    ):(
-                      <div style={{display:'grid',gridTemplateColumns:'90px 1fr auto',alignItems:'center',padding:'10px 12px',borderBottom:'1px solid var(--border)',gap:8}}>
-                        <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:12,color:'var(--text3)'}}>{entry.date}</span>
-                        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                          {[{l:'sent',v:entry.sent},{l:'replies',v:entry.replies},{l:'qual',v:entry.qualified},{l:'con',v:entry.contracts}].map(({l,v})=>toN(v)>0&&(
-                            <span key={l} style={{fontSize:12,color:'var(--text2)'}}><span style={{color:'var(--text3)'}}>{l}:</span> <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700}}>{v}</span></span>
-                          ))}
-                        </div>
-                        <div style={{display:'flex',gap:6}}>
-                          <button onClick={()=>{setEditLogId(entry.id);setEditLogData({sent:entry.sent||'',landlines:entry.landlines||'',optOuts:entry.optOuts||'',replies:entry.replies||'',conversations:entry.conversations||'',qualified:entry.qualified||'',offersMade:entry.offersMade||'',offerResponses:entry.offerResponses||'',contracts:entry.contracts||''});}} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:12}}>✎</button>
-                          <button onClick={()=>deleteLog(entry.id)} style={{padding:'4px 10px',borderRadius:6,border:'1px solid var(--red-border)',background:'var(--red-faint)',color:'var(--red)',cursor:'pointer',fontSize:12}}>×</button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
+      {/* ═══ COMBINED TAB ═══ */}
+      {mainTab==='Combined'&&(
+        <div>
+          {/* 90-Day Pace */}
+          <div style={{...CARD,border:`1px solid ${paceColor}40`}}>
+            <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:12,flexWrap:'wrap',gap:8}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:4}}>90-Day Sprint</div>
+                <div style={{fontSize:isMobile?18:22,fontWeight:900,color:'var(--text)'}}>April 25 → July 25, 2026</div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontSize:28,fontWeight:900,color:paceColor,fontFamily:'JetBrains Mono,monospace'}}>{combinedContracts}/{GOAL_CONTRACTS}</div>
+                <div style={{fontSize:11,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'0.1em'}}>Contracts</div>
               </div>
             </div>
 
-            {/* Section 2: Weekly totals grouped by Mon-Sun */}
-            {weeklyRows.length>0&&(
-              <div style={{marginBottom:16}}>
-                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>Weekly Totals</div>
-                <div style={{display:'flex',flexDirection:'column',gap:6}}>
-                  {weeklyRows.map(([ws,wt])=>(
-                    <div key={ws} style={{padding:'10px 12px',borderRadius:8,background:'var(--surface3)',border:'1px solid var(--border)',display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-                      <span style={{fontSize:12,color:'var(--text3)',fontFamily:'JetBrains Mono,monospace',minWidth:76}}>Wk {ws.slice(5)}</span>
-                      <div style={{display:'flex',gap:10,flex:1,flexWrap:'wrap'}}>
-                        {[{l:'Sent',v:wt.sent,c:'var(--text)'},{l:'Replies',v:wt.replies,c:'var(--cyan)'},{l:'Qualified',v:wt.qualified,c:'var(--gold)'},{l:'Contracts',v:wt.contracts,c:'var(--green)'}].map(({l,v,c})=>(
-                          <span key={l} style={{fontSize:12}}><span style={{color:'var(--text3)'}}>{l}:</span> <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700,color:c}}>{v.toLocaleString()}</span></span>
-                        ))}
-                      </div>
-                      <span style={{fontSize:11,color:'var(--text3)'}}>{wt.count} day{wt.count!==1?'s':''}</span>
+            {/* Progress bar */}
+            <div style={{height:10,background:'var(--surface3)',borderRadius:5,overflow:'hidden',marginBottom:12}}>
+              <div style={{height:'100%',width:`${paceProgress}%`,background:paceColor,borderRadius:5,transition:'width 0.5s'}}/>
+            </div>
+
+            <div style={{display:'flex',gap:16,flexWrap:'wrap',marginBottom:10}}>
+              <div><span style={{fontSize:12,color:'var(--text3)'}}>Status: </span><span style={{fontSize:13,fontWeight:800,color:paceColor}}>{paceStatus}</span></div>
+              <div><span style={{fontSize:12,color:'var(--text3)'}}>Days elapsed: </span><span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>{daysElapsed}</span></div>
+              <div><span style={{fontSize:12,color:'var(--text3)'}}>Days left: </span><span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>{daysLeft}</span></div>
+              <div><span style={{fontSize:12,color:'var(--text3)'}}>Projected: </span><span style={{fontSize:13,fontWeight:700,color:paceColor}}>{projectedContracts} contracts</span></div>
+            </div>
+
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+              <div style={{padding:'10px 12px',borderRadius:8,background:'var(--gold-faint)',border:'1px solid var(--gold-border)'}}>
+                <div style={{fontSize:11,color:'var(--gold)',fontWeight:700,textTransform:'uppercase',marginBottom:2}}>WCL Contracts</div>
+                <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:900,color:'var(--gold)'}}>{totalWclContracts}</div>
+              </div>
+              <div style={{padding:'10px 12px',borderRadius:8,background:'var(--purple-faint,rgba(167,139,250,0.1))',border:'1px solid var(--purple-border,rgba(167,139,250,0.3))'}}>
+                <div style={{fontSize:11,color:'var(--purple,#A78BFA)',fontWeight:700,textTransform:'uppercase',marginBottom:2}}>SMS Contracts</div>
+                <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:900,color:'var(--purple,#A78BFA)'}}>{totalSmsContracts}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Combined Reach */}
+          <div style={CARD}>
+            <div style={{fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14}}>All-Time Combined Reach</div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(110px,1fr))',gap:10,marginBottom:14}}>
+              <Stat label="Total Reach" value={totalReach.toLocaleString()} color="var(--gold)"/>
+              <Stat label="Engaged" value={totalConv.toLocaleString()}/>
+              <Stat label="Contracts" value={totalContracts} color={totalContracts>0?'var(--green)':'var(--text)'}/>
+              <Stat label="Closed" value={totalClosed} color={totalClosed>0?'var(--green)':'var(--text)'}/>
+            </div>
+
+            {/* WCL vs SMS breakdown */}
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+              <div style={{padding:'12px 14px',borderRadius:10,background:'var(--gold-faint)',border:'1px solid var(--gold-border)'}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:'var(--gold)',marginBottom:8,letterSpacing:'0.08em'}}>WCL (Wholesale)</div>
+                <div style={{display:'flex',flexDirection:'column',gap:5}}>
+                  {[['Received',combWcl.rec],['Accepted',combWcl.acc],['Qualified',combWcl.qual],['Offers',combWcl.off],['Contracts',combWcl.con],['Closed',combWcl.cls]].map(([l,v])=>(
+                    <div key={l} style={{display:'flex',justifyContent:'space-between',fontSize:13}}>
+                      <span style={{color:'var(--text3)'}}>{l}</span>
+                      <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700,color:'var(--text)'}}>{v}</span>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
-
-            {/* Section 3: Campaign totals summary tiles */}
-            <div>
-              <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:8}}>Campaign Summary</div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(100px,1fr))',gap:8}}>
-                {[
-                  {l:'Total Sent',v:stats.totalSent,c:'var(--text)'},{l:'Delivered',v:stats.deliv,c:'var(--cyan)'},
-                  {l:'Replies',v:stats.replies,c:'var(--cyan)'},{l:'Conversations',v:stats.cConvos,c:'var(--gold)'},
-                  {l:'Qualified',v:stats.cQual,c:'var(--gold)'},{l:'Offers',v:stats.cOffers,c:'var(--orange)'},
-                  {l:'Responses',v:stats.cResp,c:'var(--orange)'},{l:'Contracts',v:stats.cContracts,c:'var(--green)'},
-                ].map(({l,v,c})=>(
-                  <div key={l} style={{textAlign:'center',padding:'10px 8px',borderRadius:8,background:'var(--surface3)'}}>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:800,color:c}}>{v.toLocaleString()}</div>
-                    <div style={{fontSize:10,color:'var(--text3)',marginTop:2}}>{l}</div>
-                  </div>
-                ))}
+              <div style={{padding:'12px 14px',borderRadius:10,background:'var(--purple-faint,rgba(167,139,250,0.1))',border:'1px solid var(--purple-border,rgba(167,139,250,0.3))'}}>
+                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',color:'var(--purple,#A78BFA)',marginBottom:8,letterSpacing:'0.08em'}}>SMS ({campaigns.filter(c=>!c.deleted).length} campaigns)</div>
+                <div style={{display:'flex',flexDirection:'column',gap:5}}>
+                  {[['Sent',combSms.sent],['Interested',combSms.int],['Convos',combSms.conv],['Qualified',combSms.qual],['Offers',combSms.off],['Contracts',combSms.con],['Closed',combSms.cls]].map(([l,v])=>(
+                    <div key={l} style={{display:'flex',justifyContent:'space-between',fontSize:13}}>
+                      <span style={{color:'var(--text3)'}}>{l}</span>
+                      <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700,color:'var(--text)'}}>{v}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
-        )}
-      </div>
-    );
-  }
 
-  // Weekly best/worst day (by qualified)
-  const weekStart=getWeekStart(todayISO());
-  const weekEntries=wclEntries.filter(e=>e.date>=weekStart&&e.date<=todayISO());
-  const wQual=e=>toN(e.qualified??e.conversations??0);
-  const weekBest=weekEntries.length>1?weekEntries.reduce((b,e)=>wQual(e)>wQual(b)?e:b,weekEntries[0]):null;
-  const weekWorst=weekEntries.length>1?weekEntries.reduce((b,e)=>wQual(e)<wQual(b)?e:b,weekEntries[0]):null;
-
-  // Monthly side-by-side
-  const thisMonthStr=todayISO().slice(0,7);
-  const lastMonthDate=new Date();lastMonthDate.setMonth(lastMonthDate.getMonth()-1);
-  const lastMonthStr=lastMonthDate.toISOString().slice(0,7);
-  const thisMonthEntries=wclEntries.filter(e=>e.date.startsWith(thisMonthStr));
-  const lastMonthEntries=wclEntries.filter(e=>e.date.startsWith(lastMonthStr));
-  const mSum=(es,key)=>es.reduce((s,e)=>s+toN(key==='qualified'?e.qualified??e.conversations??0:e[key]),0);
-
-  // Today all channels (for Combined tab) — uses active filtered entries
-  const todayISOS=todayISO();
-  const todaySMSEntries=activeSmsEntries.filter(e=>e.date===todayISOS);
-  const todayWCLEntry=activeWclEntries.find(e=>e.date===todayISOS);
-  const todayAllRec=toN(todayWCLEntry?.received)+(todaySMSEntries.reduce((s,e)=>s+toN(e.sent),0));
-  const todayAllCon=toN(todayWCLEntry?.contracts)+(todaySMSEntries.reduce((s,e)=>s+toN(e.contracts),0));
-
-  // This week all channels — uses active filtered entries
-  const weekWCLContracts=activeWclEntries.filter(e=>e.date>=weekStart&&e.date<=todayISOS).reduce((s,e)=>s+toN(e.contracts),0);
-  const weekSMSEntries=activeSmsEntries.filter(e=>e.date>=weekStart&&e.date<=todayISOS);
-  const weekSMSContracts=weekSMSEntries.reduce((s,e)=>s+toN(e.contracts),0);
-  const weekAllContracts=weekWCLContracts+weekSMSContracts;
-
-  return (
-    <div style={{minHeight:'100vh',background:'var(--bg)',paddingBottom:isMobile?80:40}}>
-      <nav style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:`0 ${p}px`,height:58,background:'var(--surface)',borderBottom:'1px solid var(--border)',position:'sticky',top:0,zIndex:100}}>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <button onClick={()=>router.push('/')} style={{background:'none',border:'none',color:'var(--text3)',fontSize:20,cursor:'pointer',padding:'4px 8px',borderRadius:6}}>←</button>
-          <span style={{fontWeight:700,fontSize:16,color:'var(--text)'}}>KPI Tracker</span>
-        </div>
-        {mainTab==='WCL'&&(
-          <div style={{display:'flex',gap:6}}>
-            {['Daily','Weekly','Monthly'].map(per=>(
-              <button key={per} onClick={()=>setPeriod(per)} style={{padding:'6px 14px',borderRadius:20,border:`1px solid ${period===per?'var(--gold-border)':'var(--border)'}`,background:period===per?'var(--gold-faint)':'transparent',color:period===per?'var(--gold)':'var(--text3)',fontSize:13,fontWeight:period===per?700:500,cursor:'pointer'}}>{per}</button>
-            ))}
-          </div>
-        )}
-      </nav>
-
-      <div style={{background:'var(--surface)',borderBottom:'1px solid var(--border)',display:'flex',overflowX:'auto'}}>
-        {['WCL','SMS Campaigns','Combined'].map(t=>(
-          <button key={t} onClick={()=>setMainTab(t)} style={{padding:'14px 24px',background:'none',border:'none',borderBottom:mainTab===t?'2px solid var(--gold)':'2px solid transparent',color:mainTab===t?'var(--gold)':'var(--text3)',fontSize:14,fontWeight:mainTab===t?700:500,cursor:'pointer',whiteSpace:'nowrap',transition:'color 0.15s'}}>{t}</button>
-        ))}
-      </div>
-
-      <div style={{maxWidth:900,margin:'0 auto',padding:`${isMobile?16:24}px ${p}px`}}>
-
-        {/* ── WCL TAB ── */}
-        {mainTab==='WCL'&&(
-          <>
-            {/* 14-day Calendar Strip */}
-            <div style={{...CARD,padding:'14px 16px',marginBottom:14,overflowX:'auto'}}>
-              <div style={{display:'flex',gap:6,minWidth:'max-content'}}>
-                {calDates.map(date=>{
-                  const hasEntry=wclEntries.some(e=>e.date===date);
-                  const isSelected=date===selectedDate;
-                  const isToday=date===todayISO();
-                  const dayObj=new Date(date+'T00:00:00');
+          {/* Combined conversion rates */}
+          {(totalReach>0)&&(
+            <div style={CARD}>
+              <div style={{fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.12em',color:'var(--text3)',marginBottom:14}}>Combined Conversion</div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {[
+                  {l:'Reach → Engaged',a:totalConv,b:totalReach},
+                  {l:'Engaged → Contracts',a:totalContracts,b:totalConv},
+                  {l:'Reach → Contracts',a:totalContracts,b:totalReach},
+                  {l:'Contracts → Closed',a:totalClosed,b:totalContracts},
+                ].filter(x=>x.b>0).map(({l,a,b})=>{
+                  const r=Math.round(safePct(a,b));
                   return(
-                    <button key={date} onClick={()=>setSelectedDate(date)} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3,padding:'8px 10px',borderRadius:8,border:`2px solid ${isSelected?'var(--gold)':'var(--border)'}`,background:isSelected?'var(--gold-faint)':'var(--surface2)',cursor:'pointer',minWidth:44}}>
-                      <span style={{fontSize:10,color:isSelected?'var(--gold)':isToday?'var(--cyan)':'var(--text3)',fontWeight:700}}>{DAY_ABBR[dayObj.getDay()]}</span>
-                      <span style={{fontSize:14,fontWeight:800,color:isSelected?'var(--gold)':'var(--text)',lineHeight:1}}>{dayObj.getDate()}</span>
-                      {hasEntry?<div style={{width:6,height:6,borderRadius:'50%',background:isSelected?'var(--gold)':'var(--green)'}}/>:<div style={{width:6,height:6}}/>}
-                    </button>
+                    <div key={l} style={{display:'flex',alignItems:'center',gap:12}}>
+                      <div style={{fontSize:13,color:'var(--text2)',minWidth:160}}>{l}</div>
+                      <div style={{flex:1,height:6,background:'var(--surface3)',borderRadius:3,overflow:'hidden'}}>
+                        <div style={{height:'100%',width:`${Math.min(100,r)}%`,background:'var(--gold)',borderRadius:3}}/>
+                      </div>
+                      <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:13,fontWeight:700,color:'var(--text)',minWidth:42,textAlign:'right'}}>{r}%</div>
+                    </div>
                   );
                 })}
               </div>
             </div>
-
-            {/* Log button + toast */}
-            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-              <button onClick={()=>{if(showLogForm){setShowLogForm(false);setEditId(null);}else openLogForm();}} style={{padding:'10px 20px',borderRadius:10,border:'none',background:'var(--gold)',color:'#000',fontWeight:800,fontSize:14,cursor:'pointer',minHeight:46}}>
-                {showLogForm?'Close Form':'Log Entry'}
-              </button>
-              {wclToast&&<span style={{fontSize:14,fontWeight:700,color:'var(--green)',padding:'6px 14px',borderRadius:8,background:'var(--green-faint)',border:'1px solid var(--green-border)'}}>{wclToast}</span>}
-            </div>
-
-            {showLogForm&&(
-              <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:'3px solid var(--gold)',borderRadius:14,padding:'20px 24px',marginBottom:16}}>
-                <div style={SEC}>{editId?'Editing Entry':'Log WCL Entry'} — {wclDate}</div>
-                <div style={{marginBottom:14}}>
-                  <DatePicker label="Date" value={wclDate} onChange={v=>{setWclDate(v);setSelectedDate(v);}}/>
-                </div>
-                {[
-                  {id:'wcl-first-input',l:'Leads Received',v:received,set:setReceived,rateEl:null},
-                  {l:'Leads Accepted',v:accepted,set:setAccepted,rateEl:fRec>0?<RateIndicator rate={fAccRate} low={60} high={75}/>:null},
-                  {l:'Qualified',v:qualified,set:setQualified,rateEl:fAcc>0?<RateIndicator rate={fQualRate} low={30} high={40}/>:null},
-                  {l:'Offers Made',v:offersMade,set:setOffersMade,rateEl:fQual>0?<RateIndicator rate={fOfferRate} low={90} high={100}/>:null},
-                  {l:'Offer Responses',v:offerResponses,set:setOfferResponses,rateEl:fOffers>0?<RateIndicator rate={fRespRate} low={25} high={35}/>:null},
-                  {l:'Contracts',v:contracts,set:setContracts,rateEl:fResp>0?<RateIndicator rate={fContractRate} low={15} high={25}/>:null},
-                  {l:'Deals Closed',v:closed,set:setClosed,rateEl:fContracts>0?<RateIndicator rate={fClosedRate} low={80} high={100}/>:null},
-                ].map(({id,l,v,set,rateEl})=>(
-                  <div key={l} style={{marginBottom:14}}>
-                    <label style={LBL}>{l}</label>
-                    <div style={{display:'flex',gap:12,alignItems:'flex-start',flexWrap:'wrap'}}>
-                      <NInput id={id} value={v} onChange={set}/>
-                      {rateEl&&<div style={{paddingTop:12}}>{rateEl}</div>}
-                    </div>
-                    {l==='Leads Accepted'&&fAcc>0&&(
-                      <div style={{marginTop:8}}>
-                        {fRec>fAcc&&<div style={{padding:'4px 10px',borderRadius:6,background:'var(--surface3)',display:'inline-flex',gap:6,alignItems:'center',marginBottom:8}}>
-                          <span style={{fontSize:12,color:'var(--text3)'}}>Rejected:</span>
-                          <span style={{fontFamily:'JetBrains Mono,monospace',fontWeight:700,color:'var(--red)',fontSize:13}}>{fRec-fAcc}</span>
-                          <span style={{fontSize:11,color:'var(--text3)'}}>({100-fAccRate}%)</span>
-                        </div>}
-                        <div style={{fontSize:12,color:'var(--text3)',marginBottom:6}}>Rejection reasons:</div>
-                        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                          {REJ_REASONS.map(r=>{const on=rejReasons.includes(r);return(
-                            <div key={r} onClick={()=>setRejReasons(x=>on?x.filter(i=>i!==r):[...x,r])} style={{padding:'6px 12px',borderRadius:6,border:`1px solid ${on?'var(--red-border)':'var(--border)'}`,background:on?'var(--red-faint)':'var(--surface3)',color:on?'var(--red)':'var(--text3)',cursor:'pointer',fontSize:13,fontWeight:on?700:400}}>{r}</div>
-                          );})}
-                        </div>
-                      </div>
-                    )}
-                    {l==='Qualified'&&fQual>0&&(
-                      <div style={{marginTop:6,padding:'6px 10px',borderRadius:6,background:'var(--gold-faint)',border:'1px solid var(--gold-border)',display:'inline-flex',gap:6,alignItems:'center'}}>
-                        <span style={{fontSize:12,color:'var(--gold)'}}>Target: {fQual} offer{fQual!==1?'s':''} must go out today</span>
-                      </div>
-                    )}
-                    {l==='Offers Made'&&fQual>0&&fOfferRate<90&&(
-                      <div style={{marginTop:6,fontSize:13,color:'var(--orange)'}}>Every qualified lead must receive an offer — what stopped the offer?</div>
-                    )}
-                  </div>
-                ))}
-                <button onClick={saveWCL} disabled={saving} style={{width:'100%',minHeight:52,borderRadius:10,border:'none',background:'var(--gold)',color:'#000',fontWeight:800,fontSize:15,cursor:'pointer'}}>
-                  {saving?'Saving…':'Save Entry'}
-                </button>
-              </div>
-            )}
-
-            {/* Stat cards for selected date */}
-            <div style={{...CARD,marginBottom:14}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-                <span style={SEC}>{selectedDate===todayISO()?'Today':'Selected Day'} — {selectedDate}</span>
-                {!selectedEntry&&<span style={{fontSize:12,color:'var(--text3)'}}>No entry logged</span>}
-              </div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:10}}>
-                {[
-                  {l:'Qualified',v:toN(selectedEntry?.qualified??selectedEntry?.conversations??0)},
-                  {l:'Offers',v:toN(selectedEntry?.offersMade)},
-                  {l:'Contracts',v:toN(selectedEntry?.contracts)},
-                  {l:'Closed',v:toN(selectedEntry?.closed??0)},
-                ].map(({l,v})=>(
-                  <div key={l} style={{textAlign:'center',padding:'12px 8px',borderRadius:10,background:'var(--surface3)'}}>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:isMobile?24:32,fontWeight:800,color:v>0?'var(--text)':'var(--text3)',lineHeight:1,marginBottom:4}}>{v}</div>
-                    <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)'}}>{l}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Funnel */}
-            <div style={CARD}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-                <span style={SEC}>WCL Funnel — {period}</span>
-                {periodEntries.length===0&&period!=='Daily'&&<span style={{fontSize:12,color:'var(--text3)'}}>No entries this period</span>}
-              </div>
-              {funnelRows.map(({l,num,rate,low,high})=>{
-                const hasRate=rate!==null&&rate!==undefined;
-                const color=hasRate?(rate>=(high||100)?'var(--gold)':rate>=(low||0)?'var(--green)':'var(--red)'):'var(--text)';
-                const status=hasRate?(rate>=(high||100)?'ABOVE':rate>=(low||0)?'IN RANGE':'BELOW'):null;
-                const noData=periodEntries.length===0;
-                return(
-                  <div key={l} style={{display:'flex',alignItems:'center',padding:'12px 0',borderBottom:'1px solid var(--border)',gap:12}}>
-                    <div style={{flex:1,fontSize:14,color:'var(--text2)',fontWeight:600}}>{l}</div>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:24,fontWeight:800,color:noData?'var(--text3)':'var(--text)',minWidth:50,textAlign:'center'}}>
-                      {noData?'—':num}
-                    </div>
-                    <div style={{minWidth:140,display:'flex',alignItems:'center',justifyContent:'flex-end',gap:8}}>
-                      {hasRate?(
-                        noData?<span style={{fontFamily:'JetBrains Mono,monospace',fontSize:16,fontWeight:800,color:'var(--text3)'}}>—%</span>:(
-                          <>
-                            <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:16,fontWeight:800,color}}>{rate}%</span>
-                            <span style={{fontSize:10,padding:'1px 6px',borderRadius:4,background:color+'18',color,border:`1px solid ${color}40`,fontWeight:700}}>{status}</span>
-                          </>
-                        )
-                      ):<span style={{fontSize:12,color:'var(--text3)'}}>first step</span>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Activity chart */}
-            {chartData.length>0&&(
-              <div style={CARD}>
-                <div style={SEC}>WCL Activity</div>
-                <ResponsiveContainer width="100%" height={isMobile?180:240}>
-                  <ComposedChart data={chartData} margin={{top:0,right:10,bottom:0,left:-20}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-                    <XAxis dataKey="date" tick={{fontSize:12,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
-                    <YAxis tick={{fontSize:12,fill:'var(--text3)'}} axisLine={false} tickLine={false}/>
-                    <Tooltip {...CHART_TOOLTIP}/>
-                    <Bar dataKey="received" name="Received" fill="rgba(232,160,32,0.40)" radius={[4,4,0,0]}/>
-                    <Bar dataKey="accepted" name="Accepted" fill="rgba(34,197,94,0.40)" radius={[4,4,0,0]}/>
-                    <Line type="monotone" dataKey="offers" name="Offers" stroke="var(--cyan)" strokeWidth={2} dot={false}/>
-                    <Line type="monotone" dataKey="contracts" name="Contracts" stroke="var(--green)" strokeWidth={2} dot={false}/>
-                    <Legend wrapperStyle={{fontSize:13,color:'var(--text2)'}}/>
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-
-            {/* Rejection analysis */}
-            {rejData.length>0&&(
-              <div style={CARD}>
-                <div style={SEC}>Rejection Analysis</div>
-                {rejData.map(({reason,count,pct:p},i)=>(
-                  <div key={reason} style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
-                    <span style={{width:120,fontSize:13,color:'var(--text2)',flexShrink:0}}>{reason}</span>
-                    <div style={{flex:1,height:8,borderRadius:4,background:'var(--surface3)',overflow:'hidden'}}>
-                      <div style={{height:'100%',borderRadius:4,width:`${p}%`,background:REJ_COLORS[i%REJ_COLORS.length]}}/>
-                    </div>
-                    <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:13,color:'var(--text2)',minWidth:60,textAlign:'right'}}>{count} ({p}%)</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {diag&&(
-              <div style={{padding:'14px 18px',borderRadius:12,background:diag.bg,border:`1px solid ${diag.border}`,marginBottom:14}}>
-                <div style={{fontWeight:800,color:diag.color,fontSize:14,marginBottom:4}}>{diag.title}</div>
-                <div style={{color:diag.color,fontSize:13,opacity:0.85}}>{diag.msg}</div>
-              </div>
-            )}
-
-            {/* Weekly best/worst */}
-            {weekEntries.length>1&&(
-              <div style={CARD}>
-                <div style={SEC}>This Week</div>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-                  {weekBest&&<div style={{padding:'12px',borderRadius:8,background:'var(--green-faint)',border:'1px solid var(--green-border)'}}>
-                    <div style={{fontSize:11,color:'var(--green)',fontWeight:700,marginBottom:4}}>BEST DAY</div>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--green)'}}>{wQual(weekBest)}</div>
-                    <div style={{fontSize:12,color:'var(--text3)'}}>{weekBest.date} qualified</div>
-                  </div>}
-                  {weekWorst&&<div style={{padding:'12px',borderRadius:8,background:'var(--red-faint)',border:'1px solid var(--red-border)'}}>
-                    <div style={{fontSize:11,color:'var(--red)',fontWeight:700,marginBottom:4}}>WORST DAY</div>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--red)'}}>{wQual(weekWorst)}</div>
-                    <div style={{fontSize:12,color:'var(--text3)'}}>{weekWorst.date} qualified</div>
-                  </div>}
-                </div>
-              </div>
-            )}
-
-            {/* Monthly side-by-side */}
-            {(thisMonthEntries.length>0||lastMonthEntries.length>0)&&(
-              <div style={CARD}>
-                <div style={SEC}>Monthly Comparison</div>
-                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr',gap:'0',borderRadius:10,overflow:'hidden',border:'1px solid var(--border)'}}>
-                  {[['Metric','var(--text3)'],['This Month','var(--gold)'],['Last Month','var(--text3)']].map(([h,c],i)=>(
-                    <div key={i} style={{padding:'10px 14px',background:'var(--surface3)',borderBottom:'1px solid var(--border)',fontWeight:700,color:c,fontSize:12}}>{h}</div>
-                  ))}
-                  {[
-                    {l:'Leads Received',k:'received'},
-                    {l:'Accepted',k:'accepted'},
-                    {l:'Qualified',k:'qualified'},
-                    {l:'Offers Made',k:'offersMade'},
-                    {l:'Contracts',k:'contracts'},
-                    {l:'Closed',k:'closed'},
-                  ].map(({l,k})=>[
-                    <div key={`l${k}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',color:'var(--text2)',fontSize:13}}>{l}</div>,
-                    <div key={`t${k}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',fontSize:15,fontWeight:700,color:'var(--gold)'}}>{mSum(thisMonthEntries,k)}</div>,
-                    <div key={`p${k}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',fontSize:15,fontWeight:600,color:'var(--text3)'}}>{mSum(lastMonthEntries,k)}</div>,
-                  ])}
-                </div>
-              </div>
-            )}
-
-            {/* Entry log */}
-            {wclEntries.length>0&&(
-              <EntryLog wclEntries={wclEntries} editEntry={editEntry} deleteWCL={deleteWCL}/>
-            )}
-          </>
-        )}
-
-        {/* ── SMS CAMPAIGNS TAB ── */}
-        {mainTab==='SMS Campaigns'&&(
-          <>
-            <div style={{display:'flex',justifyContent:'flex-end',marginBottom:14}}>
-              <button onClick={()=>setShowCampForm(f=>!f)} style={{padding:'10px 20px',borderRadius:10,border:'none',background:'var(--purple)',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer',minHeight:46}}>
-                {showCampForm?'Close':'New Campaign'}
-              </button>
-            </div>
-
-            {showCampForm&&(
-              <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:'3px solid var(--purple)',borderRadius:14,padding:'20px 24px',marginBottom:16}}>
-                <div style={SEC}>Create SMS Campaign</div>
-                <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr',gap:12,marginBottom:14}}>
-                  <div><label style={LBL}>Campaign Name</label><input style={INPUT} value={campName} onChange={e=>setCampName(e.target.value)} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)' }/></div>
-                  <div><label style={LBL}>Target County</label><input style={INPUT} value={campCounty} onChange={e=>setCampCounty(e.target.value)} placeholder="e.g. Cuyahoga" onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)' }/></div>
-                  <div><label style={LBL}>Filter Stack</label>
-                    <select style={{...INPUT,height:48}} value={campFilter} onChange={e=>setCampFilter(e.target.value)}>
-                      {['Absentee+Tax Delinquent+Equity','Absentee+Equity','Tax Delinquent+Equity','Absentee Only','Pre-Foreclosure','Probate','High Equity','Custom'].map(f=><option key={f} value={f}>{f}</option>)}
-                    </select>
-                  </div>
-                  <div><label style={LBL}>List Size</label><input style={{...INPUT,fontFamily:'JetBrains Mono,monospace',fontSize:18}} type="text" inputMode="numeric" value={campList} onChange={e=>setCampList(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)' }/></div>
-                  <div><label style={LBL}>Daily Send Volume</label><input style={INPUT} type="text" inputMode="numeric" value={campDaily} onChange={e=>setCampDaily(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)' }/></div>
-                  <div><label style={LBL}>Duration (days)</label><input style={INPUT} type="text" inputMode="numeric" value={campDuration} onChange={e=>setCampDuration(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)' }/></div>
-                  <div><label style={LBL}>List Cost ($)</label>
-                    <div style={{position:'relative'}}><span style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:'var(--text3)',pointerEvents:'none',zIndex:1}}>$</span>
-                    <input style={{...INPUT,paddingLeft:24}} type="text" inputMode="numeric" value={campCost} onChange={e=>setCampCost(e.target.value.replace(/[^0-9]/g,''))} onFocus={e=>e.target.style.borderColor='var(--border2)'} onBlur={e=>e.target.style.borderColor='var(--border)' }/></div>
-                  </div>
-                  <div><DatePicker label="Start Date" value={campStart} onChange={setCampStart}/></div>
-                </div>
-                <div style={{marginBottom:14}}>
-                  <label style={LBL}>Color</label>
-                  <div style={{display:'flex',gap:8}}>{CAMP_COLORS.map(c=><div key={c} onClick={()=>setCampColor(c)} style={{width:28,height:28,borderRadius:'50%',background:c,cursor:'pointer',outline:campColor===c?`3px solid ${c}`:'3px solid transparent',outlineOffset:2}}/>)}</div>
-                </div>
-                {(toN(campDaily)*toN(campDuration))>0&&(
-                  <div style={{padding:'12px 14px',borderRadius:10,background:'var(--surface3)',border:'1px solid var(--border)',marginBottom:14}}>
-                    <div style={{fontSize:12,fontWeight:700,color:'var(--text3)',marginBottom:8}}>Preview</div>
-                    {(()=>{const total=toN(campDaily)*toN(campDuration);const cost=toN(campCost);return(<>
-                      {[{l:'Total Planned Sends',v:fmtNum(total)},{l:'Est. Replies at 2%',v:fmtNum(Math.round(total*0.02))},{l:'Est. Replies at 5%',v:fmtNum(Math.round(total*0.05))},{l:'Cost Per Send',v:`$${(cost/total).toFixed(4)}`},{l:'Cost/Reply at 2%',v:`$${(cost/(total*0.02)).toFixed(2)}`},{l:'Cost/Reply at 5%',v:`$${(cost/(total*0.05)).toFixed(2)}`}].map(({l,v})=>(
-                        <div key={l} style={{display:'flex',justifyContent:'space-between',padding:'4px 0',fontSize:13}}><span style={{color:'var(--text3)'}}>{l}</span><span style={{fontFamily:'JetBrains Mono,monospace',color:'var(--text2)',fontWeight:600}}>{v}</span></div>
-                      ))}</>);})()}
-                  </div>
-                )}
-                <button onClick={createCampaign} style={{width:'100%',minHeight:46,borderRadius:10,border:'none',background:'var(--purple)',color:'#fff',fontWeight:800,fontSize:14,cursor:'pointer'}}>Create Campaign</button>
-              </div>
-            )}
-
-            {campaigns.length===0&&<div style={{textAlign:'center',padding:'48px 0',color:'var(--text3)'}}>No campaigns yet. Create your first campaign above.</div>}
-
-            {activeCamps.length>0&&(
-              <div style={{marginBottom:8}}>
-                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--green)',marginBottom:10,padding:'0 4px'}}>Active ({activeCamps.length})</div>
-                {activeCamps.map(camp=><CampaignCard key={camp.id} camp={camp}/>)}
-              </div>
-            )}
-            {pausedCamps.length>0&&(
-              <div style={{marginBottom:8}}>
-                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:10,padding:'0 4px'}}>Paused ({pausedCamps.length})</div>
-                {pausedCamps.map(camp=><CampaignCard key={camp.id} camp={camp}/>)}
-              </div>
-            )}
-            {archivedCamps.length>0&&(
-              <div style={{marginBottom:8}}>
-                <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.1em',color:'var(--text3)',marginBottom:10,padding:'0 4px'}}>Archived ({archivedCamps.length})</div>
-                {archivedCamps.map(camp=><CampaignCard key={camp.id} camp={camp}/>)}
-              </div>
-            )}
-          </>
-        )}
-
-        {/* ── COMBINED TAB ── */}
-        {mainTab==='Combined'&&(
-          <>
-            {/* Empty state */}
-            {wclEntries.length===0&&smsEntries.length===0&&(
-              <div style={{textAlign:'center',padding:'64px 0',color:'var(--text3)'}}>
-                <div style={{fontSize:32,marginBottom:12}}>📊</div>
-                <div style={{fontSize:16,fontWeight:700,marginBottom:8}}>No data yet</div>
-                <div style={{fontSize:14}}>Log WCL entries or SMS campaign days to see combined stats.</div>
-              </div>
-            )}
-
-            {/* 90-Day Pace */}
-            <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderLeft:`3px solid ${paceColor}`,borderRadius:14,padding:'20px 24px',marginBottom:14}}>
-              <div style={SEC}>90-Day Goal Progress</div>
-              <div style={{height:8,borderRadius:4,background:'var(--surface3)',overflow:'hidden',marginBottom:12}}>
-                <div style={{height:'100%',borderRadius:4,width:`${Math.min(100,pct(combinedContracts,GOAL_CONTRACTS))}%`,background:paceColor,transition:'width 0.5s ease'}}/>
-              </div>
-              <div style={{display:'flex',justifyContent:'space-between',marginBottom:14,flexWrap:'wrap',gap:8}}>
-                <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:48,fontWeight:900,color:paceColor,lineHeight:1}}>{combinedContracts}</div>
-                <div style={{textAlign:'right'}}>
-                  <div style={{fontSize:22,fontWeight:800,color:paceColor}}>{paceStatus}</div>
-                  <div style={{fontSize:13,color:'var(--text3)'}}>{GOAL_CONTRACTS} contracts by Jul 25, 2026</div>
-                  <div style={{fontSize:13,color:'var(--text3)'}}>{daysLeft} days remaining · Day {daysElapsed} of {PACE_TOTAL_DAYS}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Today All Channels */}
-            <div style={CARD}>
-              <div style={SEC}>Today — All Channels</div>
-              {(wclEntries.length>0||smsEntries.length>0)?(
-                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
-                  {[
-                    {l:'Total Reach',v:todayAllRec,c:'var(--gold)'},
-                    {l:'WCL Contracts',v:toN(todayWCLEntry?.contracts),c:'var(--gold)'},
-                    {l:'SMS Contracts',v:todaySMSEntries.reduce((s,e)=>s+toN(e.contracts),0),c:'var(--cyan)'},
-                  ].map(s=>(
-                    <div key={s.l} style={{textAlign:'center',padding:'14px 8px',borderRadius:10,background:'var(--surface3)'}}>
-                      <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:28,fontWeight:800,color:s.c,marginBottom:4}}>{s.v}</div>
-                      <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)'}}>{s.l}</div>
-                    </div>
-                  ))}
-                </div>
-              ):<div style={{color:'var(--text3)',fontSize:14}}>No activity logged today.</div>}
-            </div>
-
-            {/* This Week */}
-            <div style={CARD}>
-              <div style={SEC}>This Week — All Channels</div>
-              <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
-                {[
-                  {l:'WCL Contracts',v:weekWCLContracts,c:'var(--gold)'},
-                  {l:'SMS Contracts',v:weekSMSContracts,c:'var(--cyan)'},
-                  {l:'Combined',v:weekAllContracts,c:paceColor},
-                  {l:'WCL Leads',v:activeWclEntries.filter(e=>e.date>=weekStart&&e.date<=todayISOS).reduce((s,e)=>s+toN(e.received),0),c:'var(--text2)'},
-                ].map(s=>(
-                  <div key={s.l} style={{textAlign:'center',padding:'12px 8px',borderRadius:10,background:'var(--surface3)'}}>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:24,fontWeight:800,color:s.c,marginBottom:4}}>{s.v}</div>
-                    <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)'}}>{s.l}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Contract totals */}
-            <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr 1fr':'repeat(4,1fr)',gap:12,marginBottom:14}}>
-              {[{l:'WCL Contracts',v:totalContracts,c:'var(--gold)'},{l:'SMS Contracts',v:totalSMSContracts,c:'var(--cyan)'},{l:'Total Contracts',v:combinedContracts,c:paceColor},{l:'Goal',v:GOAL_CONTRACTS,c:'var(--text3)'}].map(s=>(
-                <div key={s.l} style={{...CARD,textAlign:'center',padding:'16px',marginBottom:0}}>
-                  <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:28,fontWeight:800,color:s.c,marginBottom:4}}>{s.v}</div>
-                  <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)'}}>{s.l}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Channel Comparison */}
-            {(wclEntries.length>0||activeCamps.length>0)&&(
-              <div style={CARD}>
-                <div style={SEC}>Channel Comparison</div>
-                <div style={{display:'grid',gridTemplateColumns:'auto 1fr 1fr',gap:'0',borderRadius:10,overflow:'hidden',border:'1px solid var(--border)'}}>
-                  {['Metric','WCL','SMS Avg'].map((h,i)=>(
-                    <div key={h} style={{padding:'10px 14px',background:'var(--surface3)',borderBottom:'1px solid var(--border)',fontWeight:700,color:i===1?'var(--gold)':i===2?'var(--cyan)':'var(--text3)',fontSize:12}}>{h}</div>
-                  ))}
-                  {[
-                    {l:'Acceptance Rate',wcl:accRate,smsKey:'delivRate',low:60,high:75},
-                    {l:'Offer Rate',wcl:offerRate,smsKey:'offerRate',low:90,high:100},
-                    {l:'Response Rate',wcl:respRate,smsKey:'respRate',low:25,high:35},
-                    {l:'Contract Rate',wcl:contractRate,smsKey:'contractRate',low:15,high:25},
-                  ].map(({l,wcl,smsKey})=>{
-                    const campStatsArr=activeCamps.map(c=>campStats(c));
-                    const smsAvg=campStatsArr.length>0?Math.round(campStatsArr.reduce((s,st)=>s+(st[smsKey]||0),0)/campStatsArr.length):0;
-                    const wclWins=wcl>smsAvg;
-                    return [
-                      <div key={`l${l}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',color:'var(--text2)',fontSize:13}}>{l}</div>,
-                      <div key={`w${l}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',fontSize:15,fontWeight:700,color:wclWins?'var(--gold)':'var(--text3)',background:wclWins?'var(--gold-faint)':'transparent'}}>{wcl}%</div>,
-                      <div key={`s${l}`} style={{padding:'10px 14px',borderBottom:'1px solid var(--border)',fontFamily:'JetBrains Mono,monospace',fontSize:15,fontWeight:700,color:!wclWins?'var(--cyan)':'var(--text3)',background:!wclWins?'var(--cyan-faint)':'transparent'}}>{smsAvg}%</div>,
-                    ];
-                  })}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {isMobile&&(
-        <nav style={{position:'fixed',bottom:0,left:0,right:0,height:64,background:'var(--surface)',borderTop:'1px solid var(--border)',display:'flex',alignItems:'center',zIndex:100}}>
-          {[{href:'/',icon:'⌂',label:'Home'},{href:'/calculator',icon:'◈',label:'Offers'},{href:'/kpi',icon:'◉',label:'KPI'},{href:'/revenue',icon:'◆',label:'Revenue'},{href:'/scorecard',icon:'◐',label:'Score'}].map(item=>(
-            <div key={item.href} onClick={()=>router.push(item.href)} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:2,cursor:'pointer',color:item.href==='/kpi'?'var(--gold)':'var(--text3)'}}>
-              <span style={{fontSize:18}}>{item.icon}</span><span style={{fontSize:10,fontWeight:600}}>{item.label}</span>
-            </div>
-          ))}
-        </nav>
+          )}
+        </div>
       )}
     </div>
   );

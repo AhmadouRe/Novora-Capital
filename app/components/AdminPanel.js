@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import DatePicker from './DatePicker.js';
 
 const COLORS = ['#06B6D4','#A78BFA','#22C55E','#EF4444','#F97316','#3B82F6'];
-const TABS = ['Members','Add Member','Change PINs','Access Control','Goal Settings','Split Settings','Deleted Items','Audit Log','Backup'];
+const TABS = ['Members','Add Member','Change PINs','Access Control','Goal Settings','Split Settings','KPI Settings','Deleted Items','Audit Log','Backup'];
 
 const INPUT = { minHeight:48, padding:'12px 16px', borderRadius:10, background:'var(--surface3)', border:'1px solid var(--border)', color:'var(--text)', fontSize:15, width:'100%', outline:'none', fontFamily:'Outfit,sans-serif' };
 const LBL = { fontSize:12, fontWeight:700, textTransform:'uppercase', letterSpacing:'0.11em', color:'var(--text3)', marginBottom:8, display:'block' };
@@ -32,6 +32,10 @@ export default function AdminPanel({ session, onClose }) {
   const [showSplitPin, setShowSplitPin] = useState(false);
   const [splitPinErr, setSplitPinErr] = useState('');
   const [confirmRestoreId, setConfirmRestoreId] = useState(null);
+  const [kpiSettings, setKpiSettings] = useState({ wclCost:4.99, smsCostPerText:0.04, diagnosticMinDays:5, interestedReplyFloor:2.0, offerRateFloor:90 });
+  const [kpiSettingsPinVal, setKpiSettingsPinVal] = useState('');
+  const [showKpiSettingsPin, setShowKpiSettingsPin] = useState(false);
+  const [kpiSettingsPinErr, setKpiSettingsPinErr] = useState('');
 
   const [newName, setNewName] = useState('');
   const [newPin, setNewPin] = useState('');
@@ -48,6 +52,7 @@ export default function AdminPanel({ session, onClose }) {
     fetch('/api/revenue/goal').then(r=>r.json()).then(d=>{ if(d&&d.amount) setGoalForm({ amount:d.amount||'', startDate:d.startDate||'', endDate:d.endDate||'', avgDeal:d.avgDeal||'' }); }).catch(()=>{});
     fetch('/api/revenue/splits').then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setSplits(d); }).catch(()=>{});
     fetch('/api/restore?list=true').then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setDeleted(d); }).catch(()=>{});
+    fetch('/api/kpi/settings').then(r=>r.json()).then(d=>{ if(d&&!d.error) setKpiSettings(s=>({...s,...d})); }).catch(()=>{});
   }, []);
 
   function flash(m) { setMsg(m); setTimeout(()=>setMsg(''),3000); }
@@ -118,6 +123,20 @@ export default function AdminPanel({ session, onClose }) {
   }
 
   const splitsTotal = splits.reduce((s,x)=>s+Number(x.pct),0);
+
+  async function saveKpiSettings() {
+    if (!showKpiSettingsPin) { setShowKpiSettingsPin(true); setKpiSettingsPinVal(''); setKpiSettingsPinErr(''); return; }
+    if (kpiSettingsPinVal !== '2608') { setKpiSettingsPinErr('Incorrect PIN'); setKpiSettingsPinVal(''); return; }
+    setShowKpiSettingsPin(false); setKpiSettingsPinVal(''); setKpiSettingsPinErr('');
+    const res = await fetch('/api/kpi/settings', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+      wclCost: Number(kpiSettings.wclCost),
+      smsCostPerText: Number(kpiSettings.smsCostPerText),
+      diagnosticMinDays: Number(kpiSettings.diagnosticMinDays),
+      interestedReplyFloor: Number(kpiSettings.interestedReplyFloor),
+      offerRateFloor: Number(kpiSettings.offerRateFloor),
+    }) });
+    if (res.ok) flash('KPI settings saved!'); else flash('Failed to save KPI settings.');
+  }
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.85)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}} onClick={onClose}>
@@ -259,6 +278,44 @@ export default function AdminPanel({ session, onClose }) {
                 <button onClick={()=>setSplits(DEFAULT_SPLITS)} style={{...BTN_SECONDARY,flex:1}}>Reset to Defaults</button>
                 <button onClick={saveSplits} style={{...BTN_PRIMARY,flex:1}}>{showSplitPin?'Enter PIN Above':'Save Splits'}</button>
               </div>
+            </div>
+          )}
+
+          {tab==='KPI Settings' && (
+            <div style={{display:'flex',flexDirection:'column',gap:16}}>
+              <p style={{color:'var(--text3)',fontSize:13,marginBottom:4}}>Configure KPI diagnostic thresholds and cost tracking defaults.</p>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+                <div>
+                  <label style={LBL}>WCL Cost Per Lead ($)</label>
+                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.wclCost} onChange={e=>setKpiSettings(s=>({...s,wclCost:e.target.value}))} placeholder="4.99"/>
+                </div>
+                <div>
+                  <label style={LBL}>SMS Cost Per Text ($)</label>
+                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.smsCostPerText} onChange={e=>setKpiSettings(s=>({...s,smsCostPerText:e.target.value}))} placeholder="0.04"/>
+                </div>
+                <div>
+                  <label style={LBL}>Diagnostic Min Days</label>
+                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.diagnosticMinDays} onChange={e=>setKpiSettings(s=>({...s,diagnosticMinDays:e.target.value}))} placeholder="5"/>
+                </div>
+                <div>
+                  <label style={LBL}>Interested Reply Floor (%)</label>
+                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.interestedReplyFloor} onChange={e=>setKpiSettings(s=>({...s,interestedReplyFloor:e.target.value}))} placeholder="2.0"/>
+                </div>
+                <div>
+                  <label style={LBL}>Offer Rate Floor (%)</label>
+                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.offerRateFloor} onChange={e=>setKpiSettings(s=>({...s,offerRateFloor:e.target.value}))} placeholder="90"/>
+                </div>
+              </div>
+              {showKpiSettingsPin && (
+                <div style={{padding:'14px 16px',borderRadius:10,background:'var(--surface2)',border:'1px solid var(--gold-border)',display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+                  <span style={{fontSize:13,color:'var(--text2)',flex:1}}>Enter admin PIN to save KPI settings:</span>
+                  <input type="text" inputMode="numeric" maxLength={4} value={kpiSettingsPinVal} onChange={e=>setKpiSettingsPinVal(e.target.value.replace(/\D/g,'').slice(0,4))} onKeyDown={e=>{if(e.key==='Enter')saveKpiSettings();if(e.key==='Escape'){setShowKpiSettingsPin(false);setKpiSettingsPinVal('');setKpiSettingsPinErr('');}}} placeholder="PIN" style={{width:90,height:40,textAlign:'center',letterSpacing:'0.3em',fontFamily:'JetBrains Mono,monospace',fontSize:16,fontWeight:700,borderRadius:7,background:'var(--surface3)',border:`1px solid ${kpiSettingsPinErr?'var(--red)':'var(--gold-border)'}`,color:'var(--text)',outline:'none'}} autoFocus/>
+                  {kpiSettingsPinErr&&<span style={{fontSize:12,color:'var(--red)'}}>{kpiSettingsPinErr}</span>}
+                  <button onClick={saveKpiSettings} style={{...BTN_PRIMARY,minHeight:40,padding:'0 16px'}}>Confirm</button>
+                  <button onClick={()=>{setShowKpiSettingsPin(false);setKpiSettingsPinVal('');setKpiSettingsPinErr('');}} style={{...BTN_SECONDARY,minHeight:40,padding:'0 12px'}}>Cancel</button>
+                </div>
+              )}
+              <button onClick={saveKpiSettings} style={{...BTN_PRIMARY,alignSelf:'flex-start',padding:'0 28px'}}>{showKpiSettingsPin?'Enter PIN Above':'Save KPI Settings'}</button>
             </div>
           )}
 

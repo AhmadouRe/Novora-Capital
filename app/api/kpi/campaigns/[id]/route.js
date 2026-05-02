@@ -1,45 +1,62 @@
 import { NextResponse } from 'next/server';
-import { getList, saveList } from '../../../../lib/kv.js';
+import { kv } from '@vercel/kv';
 import { validateSession } from '../../../../lib/auth.js';
 import { writeAudit } from '../../../../lib/audit.js';
 
 export const dynamic = 'force-dynamic';
 
-async function getSessionFromReq(request) {
-  return await validateSession(request.cookies.get('novora_session')?.value);
+function clean(v) {
+  return typeof v === 'string' ? v.trim() : '';
 }
 
 export async function PUT(request, { params }) {
-  const session = await getSessionFromReq(request);
+  const session = await validateSession(request.cookies.get('novora_session')?.value);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const body = await request.json();
-  const list = await getList('nc:kpi:campaigns');
-  const idx = list.findIndex(c => c.id === params.id);
+
+  const campaigns = (await kv.get('nc:kpi:campaigns')) || [];
+  const idx = campaigns.findIndex(c => c.id === params.id);
   if (idx === -1) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  list[idx] = { ...list[idx], ...body, updatedAt: new Date().toISOString() };
-  await saveList('nc:kpi:campaigns', list);
+  const updates = {};
+  if (body.name !== undefined) updates.name = clean(body.name);
+  if (body.counties !== undefined) updates.counties = Array.isArray(body.counties) ? body.counties.map(s => clean(s)).filter(Boolean) : [];
+  if (body.status !== undefined) updates.status = body.status === 'closed' ? 'closed' : 'active';
+  if (body.startDate !== undefined) updates.startDate = clean(body.startDate);
+
+  campaigns[idx] = { ...campaigns[idx], ...updates, updatedAt: new Date().toISOString() };
+  await kv.set('nc:kpi:campaigns', campaigns);
   await writeAudit(session.userId, session.userName, 'novora-capital', 'CAMPAIGN_UPDATED', params.id);
-  return NextResponse.json(list[idx]);
+  return NextResponse.json(campaigns[idx]);
 }
 
 export async function DELETE(request, { params }) {
-  const session = await getSessionFromReq(request);
+  const session = await validateSession(request.cookies.get('novora_session')?.value);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  // Hard delete campaign and cascade-delete its SMS logs
-  const campaigns = await getList('nc:kpi:campaigns');
-  const campaign = campaigns.find(c => c.id === params.id);
+  const [campaigns, outreach, wclLogs, smsLogs] = await Promise.all([
+    kv.get('nc:kpi:campaigns'),
+    kv.get('nc:kpi:outreach'),
+    kv.get('nc:kpi:wcl'),
+    kv.get('nc:kpi:sms'),
+  ]);
+
+  const campaignList = campaigns || [];
+  const campaign = campaignList.find(c => c.id === params.id);
   if (!campaign) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const updatedCampaigns = campaigns.filter(c => c.id !== params.id);
-  await saveList('nc:kpi:campaigns', updatedCampaigns);
+  const updatedCampaigns = campaignList.filter(c => c.id !== params.id);
+  const updatedOutreach = (outreach || []).filter(o => o.campaignId !== params.id);
+  const updatedWcl = (wclLogs || []).map(e => e.campaignId === params.id ? { ...e, campaignId: null } : e);
+  const updatedSms = (smsLogs || []).map(e => e.campaignId === params.id ? { ...e, campaignId: null } : e);
 
-  // Cascade: remove sms entries linked to this campaign
-  const smsList = await getList('nc:kpi:sms');
-  const updatedSms = smsList.filter(s => s.campaignId !== params.id);
-  await saveList('nc:kpi:sms', updatedSms);
+  await Promise.all([
+    kv.set('nc:kpi:campaigns', updatedCampaigns),
+    kv.set('nc:kpi:outreach', updatedOutreach),
+    kv.set('nc:kpi:wcl', updatedWcl),
+    kv.set('nc:kpi:sms', updatedSms),
+  ]);
 
-  await writeAudit(session.userId, session.userName, 'novora-capital', 'CAMPAIGN_DELETED', `${campaign.name} (cascade SMS removed)`);
+  await writeAudit(session.userId, session.userName, 'novora-capital', 'CAMPAIGN_DELETED', `${campaign.name} (cascade: outreach removed, wcl/sms unlinked)`);
   return NextResponse.json({ success: true });
 }

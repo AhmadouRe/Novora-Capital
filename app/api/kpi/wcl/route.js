@@ -1,53 +1,51 @@
 import { NextResponse } from 'next/server';
-import { getList, saveList, purgeOldDeleted } from '../../../lib/kv.js';
-import { validateSession, generateId } from '../../../lib/auth.js';
+import { kv } from '@vercel/kv';
+import { validateSession } from '../../../lib/auth.js';
 import { writeAudit } from '../../../lib/audit.js';
 
 export const dynamic = 'force-dynamic';
 
-async function getSessionFromReq(request) {
-  return await validateSession(request.cookies.get('novora_session')?.value);
-}
+const KEY = 'nc:kpi:wcl';
 
 export async function GET(request) {
-  const session = await getSessionFromReq(request);
+  const session = await validateSession(request.cookies.get('novora_session')?.value);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const all = await getList('nc:kpi:wcl');
-  return NextResponse.json(all.filter(e => !e.deleted));
+  const list = (await kv.get(KEY)) || [];
+  return NextResponse.json(list.filter(e => !e.deleted));
 }
 
 export async function POST(request) {
-  const session = await getSessionFromReq(request);
+  const session = await validateSession(request.cookies.get('novora_session')?.value);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const body = await request.json();
 
-  // 409 duplicate detection: same date
-  if (body.date) {
-    const existing = await getList('nc:kpi:wcl');
-    const dup = existing.find(e => !e.deleted && e.date === body.date);
-    if (dup) return NextResponse.json({ error: 'Duplicate WCL entry for this date' }, { status: 409 });
+  const date = typeof body.date === 'string' ? body.date.trim() : '';
+
+  if (date) {
+    const existing = (await kv.get(KEY)) || [];
+    const dup = existing.find(e => !e.deleted && e.date === date);
+    if (dup) return NextResponse.json({ error: 'Duplicate WCL entry for this date', existingId: dup.id }, { status: 409 });
   }
 
   const entry = {
-    id: generateId(),
-    date: body.date || '',
+    id: Date.now().toString(),
+    date,
     received: Number(body.received) || 0,
-    accepted: Number(body.accepted) || 0,
     conversations: Number(body.conversations) || 0,
     qualified: Number(body.qualified) || 0,
     offers: Number(body.offers) || 0,
+    responses: Number(body.responses) || 0,
     contracts: Number(body.contracts) || 0,
     closed: Number(body.closed) || 0,
-    rejectionReasons: body.rejectionReasons || '',
+    campaignId: body.campaignId || null,
     loggedBy: session.userName,
     loggedAt: new Date().toISOString(),
     deleted: false,
   };
 
-  let list = await getList('nc:kpi:wcl');
-  list = purgeOldDeleted(list);
+  const list = (await kv.get(KEY)) || [];
   list.push(entry);
-  await saveList('nc:kpi:wcl', list);
-  await writeAudit(session.userId, session.userName, 'novora-capital', 'WCL_LOGGED', `Date: ${body.date}`);
+  await kv.set(KEY, list);
+  await writeAudit(session.userId, session.userName, 'novora-capital', 'WCL_LOGGED', `Date: ${date}`);
   return NextResponse.json(entry);
 }

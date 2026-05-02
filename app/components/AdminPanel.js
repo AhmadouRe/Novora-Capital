@@ -32,7 +32,7 @@ export default function AdminPanel({ session, onClose }) {
   const [showSplitPin, setShowSplitPin] = useState(false);
   const [splitPinErr, setSplitPinErr] = useState('');
   const [confirmRestoreId, setConfirmRestoreId] = useState(null);
-  const [kpiSettings, setKpiSettings] = useState({ wclCost:4.99, smsCostPerText:0.04, diagnosticMinDays:5, interestedReplyFloor:2.0, offerRateFloor:90 });
+  const [kpiSettings, setKpiSettings] = useState({ wclCost:4.99, smsCostPerText:0.04, positiveReplyFloor:1.0, offerRateFloor:90, minPositiveRepliesForDiag:10 });
   const [kpiSettingsPinVal, setKpiSettingsPinVal] = useState('');
   const [showKpiSettingsPin, setShowKpiSettingsPin] = useState(false);
   const [kpiSettingsPinErr, setKpiSettingsPinErr] = useState('');
@@ -131,9 +131,9 @@ export default function AdminPanel({ session, onClose }) {
     const res = await fetch('/api/kpi/settings', { method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
       wclCost: Number(kpiSettings.wclCost),
       smsCostPerText: Number(kpiSettings.smsCostPerText),
-      diagnosticMinDays: Number(kpiSettings.diagnosticMinDays),
-      interestedReplyFloor: Number(kpiSettings.interestedReplyFloor),
+      positiveReplyFloor: Number(kpiSettings.positiveReplyFloor),
       offerRateFloor: Number(kpiSettings.offerRateFloor),
+      minPositiveRepliesForDiag: Number(kpiSettings.minPositiveRepliesForDiag),
     }) });
     if (res.ok) flash('KPI settings saved!'); else flash('Failed to save KPI settings.');
   }
@@ -294,12 +294,12 @@ export default function AdminPanel({ session, onClose }) {
                   <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.smsCostPerText} onChange={e=>setKpiSettings(s=>({...s,smsCostPerText:e.target.value}))} placeholder="0.04"/>
                 </div>
                 <div>
-                  <label style={LBL}>Diagnostic Min Days</label>
-                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.diagnosticMinDays} onChange={e=>setKpiSettings(s=>({...s,diagnosticMinDays:e.target.value}))} placeholder="5"/>
+                  <label style={LBL}>Min Positive Replies for Diag</label>
+                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.minPositiveRepliesForDiag} onChange={e=>setKpiSettings(s=>({...s,minPositiveRepliesForDiag:e.target.value}))} placeholder="10"/>
                 </div>
                 <div>
-                  <label style={LBL}>Interested Reply Floor (%)</label>
-                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.interestedReplyFloor} onChange={e=>setKpiSettings(s=>({...s,interestedReplyFloor:e.target.value}))} placeholder="2.0"/>
+                  <label style={LBL}>Positive Reply Floor (%)</label>
+                  <input style={INPUT} type="text" inputMode="numeric" value={kpiSettings.positiveReplyFloor} onChange={e=>setKpiSettings(s=>({...s,positiveReplyFloor:e.target.value}))} placeholder="1.0"/>
                 </div>
                 <div>
                   <label style={LBL}>Offer Rate Floor (%)</label>

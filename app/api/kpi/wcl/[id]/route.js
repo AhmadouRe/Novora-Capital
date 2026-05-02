@@ -1,27 +1,45 @@
 import { NextResponse } from 'next/server';
-import { updateItem, softDeleteItem } from '../../../../lib/kv.js';
+import { kv } from '@vercel/kv';
 import { validateSession } from '../../../../lib/auth.js';
 import { writeAudit } from '../../../../lib/audit.js';
 
 export const dynamic = 'force-dynamic';
 
-async function getSessionFromReq(request) {
-  return await validateSession(request.cookies.get('novora_session')?.value);
-}
+const KEY = 'nc:kpi:wcl';
+const FIELDS = ['received', 'conversations', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
 
 export async function PUT(request, { params }) {
-  const session = await getSessionFromReq(request);
+  const session = await validateSession(request.cookies.get('novora_session')?.value);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const body = await request.json();
-  const updated = await updateItem('nc:kpi:wcl', params.id, body);
+
+  const list = (await kv.get(KEY)) || [];
+  const idx = list.findIndex(e => e.id === params.id);
+  if (idx === -1) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  const updates = {};
+  for (const f of FIELDS) {
+    if (body[f] !== undefined) updates[f] = Number(body[f]) || 0;
+  }
+  if (body.campaignId !== undefined) updates.campaignId = body.campaignId || null;
+  if (body.date !== undefined) updates.date = typeof body.date === 'string' ? body.date.trim() : '';
+
+  list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() };
+  await kv.set(KEY, list);
   await writeAudit(session.userId, session.userName, 'novora-capital', 'WCL_UPDATED', params.id);
-  return NextResponse.json(updated);
+  return NextResponse.json(list[idx]);
 }
 
 export async function DELETE(request, { params }) {
-  const session = await getSessionFromReq(request);
+  const session = await validateSession(request.cookies.get('novora_session')?.value);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  await softDeleteItem('nc:kpi:wcl', params.id);
+
+  const list = (await kv.get(KEY)) || [];
+  const idx = list.findIndex(e => e.id === params.id);
+  if (idx === -1) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  list[idx] = { ...list[idx], deleted: true, deletedAt: new Date().toISOString() };
+  await kv.set(KEY, list);
   await writeAudit(session.userId, session.userName, 'novora-capital', 'WCL_DELETED', params.id);
   return NextResponse.json({ success: true });
 }

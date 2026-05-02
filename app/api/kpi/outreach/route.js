@@ -5,7 +5,8 @@ import { writeAudit } from '../../../lib/audit.js';
 
 export const dynamic = 'force-dynamic';
 
-const KEY = 'nc:kpi:campaigns';
+const KEY = 'nc:kpi:outreach';
+const SETTINGS_KEY = 'nc:kpi:settings';
 
 function clean(v) {
   return typeof v === 'string' ? v.trim() : '';
@@ -15,7 +16,7 @@ export async function GET(request) {
   const session = await validateSession(request.cookies.get('novora_session')?.value);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const list = (await kv.get(KEY)) || [];
-  return NextResponse.json(list.filter(c => !c.deleted));
+  return NextResponse.json(list.filter(e => !e.deleted));
 }
 
 export async function POST(request) {
@@ -23,33 +24,30 @@ export async function POST(request) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const body = await request.json();
 
-  const name = clean(body.name);
-  const startDate = clean(body.startDate);
+  const settings = (await kv.get(SETTINGS_KEY)) || {};
+  const smsCostPerText = typeof settings.smsCostPerText === 'number' ? settings.smsCostPerText : 0.04;
+  const contacts = Number(body.contacts) || 0;
+  const cost = Math.round(contacts * smsCostPerText * 100) / 100;
 
-  if (name && startDate) {
-    const existing = (await kv.get(KEY)) || [];
-    const dup = existing.find(c =>
-      !c.deleted &&
-      c.name?.toLowerCase() === name.toLowerCase() &&
-      c.startDate === startDate
-    );
-    if (dup) return NextResponse.json({ error: 'Duplicate campaign for this name and start date' }, { status: 409 });
-  }
-
-  const campaign = {
+  const entry = {
     id: Date.now().toString(),
-    name,
-    counties: Array.isArray(body.counties) ? body.counties.map(s => clean(s)).filter(Boolean) : [],
-    startDate,
+    listName: clean(body.listName),
+    county: clean(body.county),
+    campaignId: body.campaignId || null,
+    contacts,
+    totalReplies: Number(body.totalReplies) || 0,
+    positiveReplies: Number(body.positiveReplies) || 0,
+    cost,
     status: body.status || 'active',
+    date: clean(body.date),
     createdBy: session.userName,
     createdAt: new Date().toISOString(),
     deleted: false,
   };
 
   const list = (await kv.get(KEY)) || [];
-  list.push(campaign);
+  list.push(entry);
   await kv.set(KEY, list);
-  await writeAudit(session.userId, session.userName, 'novora-capital', 'CAMPAIGN_CREATED', `Campaign: ${name}`);
-  return NextResponse.json(campaign);
+  await writeAudit(session.userId, session.userName, 'novora-capital', 'OUTREACH_CREATED', `List: ${entry.listName}, County: ${entry.county}`);
+  return NextResponse.json(entry);
 }

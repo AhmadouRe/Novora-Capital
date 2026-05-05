@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getList, saveList, purgeOldDeleted } from '../../lib/kv.js';
+import { getList, saveList, purgeOldDeleted, getItem, saveItem } from '../../lib/kv.js';
 import { validateSession, generateId } from '../../lib/auth.js';
 import { writeAudit } from '../../lib/audit.js';
 
@@ -33,6 +33,18 @@ export async function POST(request) {
   list = purgeOldDeleted(list);
   list.push(entry);
   await saveList('nc:expenses:entries', list);
+
+  /* Deduct from current balance for marketing and operating (non-auto-allocated entries) */
+  const account = body.account;
+  const amount = parseFloat(body.amount) || 0;
+  if (['marketing', 'operating'].includes(account) && amount > 0 && !body.autoAllocated) {
+    const balances = await getItem('nc:expenses:manual_balances') || {};
+    if (balances[account] !== undefined) {
+      balances[account] = Math.max(0, (balances[account] || 0) - amount);
+      await saveItem('nc:expenses:manual_balances', balances);
+    }
+  }
+
   await writeAudit(session.userId, session.userName, 'novora-capital', 'EXPENSE_LOGGED', `${body.vendor} — $${body.amount}`);
   return NextResponse.json(entry);
 }

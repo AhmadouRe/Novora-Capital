@@ -340,7 +340,7 @@ const LIST_TYPES = ['Pre-Foreclosure', 'Vacant', 'Tired Landlords', 'Probate', '
 
 function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm]         = useState({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', date: today(), status: 'Active' });
+  const [form, setForm]         = useState({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', textsSent: '', date: today(), status: 'Active' });
   const [saving, setSaving]     = useState(false);
   const [err, setErr]           = useState('');
   const [editId, setEditId]     = useState(null);
@@ -355,6 +355,7 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
       listType: o.listType || 'Pre-Foreclosure',
       campaignId: o.campaignId || '',
       contacts: String(o.contacts || 0),
+      textsSent: String(o.textsSent || 0),
       date: o.date || today(),
       status: o.status || 'Active',
     });
@@ -369,6 +370,7 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
       listType: form.listType,
       campaignId: form.campaignId || null,
       contacts: safeNum(form.contacts),
+      textsSent: safeNum(form.textsSent),
       date: form.date.trim(),
       status: form.status,
     };
@@ -377,7 +379,7 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
       const method = editId ? 'PUT' : 'POST';
       const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Failed'); }
-      setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', date: today(), status: 'Active' });
+      setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', textsSent: '', date: today(), status: 'Active' });
       setShowForm(false); setEditId(null); onRefresh();
     } catch (e) { setErr(e.message); }
     finally { setSaving(false); }
@@ -402,7 +404,7 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
         <div style={{ fontSize: 16, fontWeight: 700, color: C.tx }}>Outreach Lists ({outreach.length})</div>
         <button onClick={() => {
           setShowForm(!showForm); setEditId(null); setErr('');
-          setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', date: today(), status: 'Active' });
+          setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', textsSent: '', date: today(), status: 'Active' });
         }} style={{
           background: C.cyan, color: '#000', border: 'none', borderRadius: 8,
           padding: '10px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 46,
@@ -450,6 +452,12 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
             <div>
               <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Contacts Loaded</label>
               <input type="text" inputMode="numeric" value={form.contacts} onChange={e => fv('contacts', e.target.value)} placeholder="0"
+                style={inpStyle} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Texts Sent</label>
+              <div style={{ fontSize: 11, color: C.t3, marginBottom: 4 }}>Total texts sent from this list</div>
+              <input type="text" inputMode="numeric" value={form.textsSent} onChange={e => fv('textsSent', e.target.value)} placeholder="0"
                 style={inpStyle} />
             </div>
             <div>
@@ -516,6 +524,12 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
                     <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.cyan }}>{safeNum(o.contacts).toLocaleString()}</div>
                     <div style={{ fontSize: 11, color: C.t3 }}>Contacts</div>
                   </div>
+                  {safeNum(o.textsSent) > 0 && (
+                    <div style={{ textAlign: 'center', minWidth: 54 }}>
+                      <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{safeNum(o.textsSent).toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: C.t3 }}>Texts Sent</div>
+                    </div>
+                  )}
                   <button onClick={() => startEdit(o)} style={{
                     background: C.s2, color: C.t2, border: `1px solid ${C.bd}`, borderRadius: 6,
                     padding: '5px 12px', fontSize: 12, cursor: 'pointer', minHeight: 32,
@@ -570,7 +584,7 @@ function CalendarStrip({ entries, accentColor }) {
 const SMS_FIELDS = ['sent', 'positiveReplies', 'wantsToSell', 'qualified', 'offers', 'contracts'];
 const SMS_LABELS = { sent: 'Sent', positiveReplies: '+Replies', wantsToSell: 'Wants to Sell', qualified: 'Qualified', offers: 'Offers', contracts: 'Contracts' };
 
-function PipelineTab({ sms, campaigns, settings, onRefresh }) {
+function PipelineTab({ sms, outreach, campaigns, settings, onRefresh }) {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId]     = useState(null);
   const [form, setForm]         = useState({});
@@ -579,25 +593,49 @@ function PipelineTab({ sms, campaigns, settings, onRefresh }) {
 
   const smsCostPerText = safeNum(settings.smsCostPerText) || 0.04;
 
+  /* Total texts sent comes from outreach entries */
+  const totalTextsSent = useMemo(() => outreach.filter(o => !o.deleted).reduce((s, o) => s + safeNum(o.textsSent || 0), 0), [outreach]);
+
   function fv(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
   function blankForm() {
     const base = { date: today(), campaignId: '' };
-    SMS_FIELDS.forEach(f => { base[f] = '0'; });
+    SMS_FIELDS.filter(f => f !== 'sent').forEach(f => { base[f] = '0'; });
     return base;
   }
 
   function startEdit(entry) {
     setEditId(entry.id);
     const f = { date: entry.date || today(), campaignId: entry.campaignId || '' };
-    SMS_FIELDS.forEach(fk => { f[fk] = String(entry[fk] || 0); });
+    SMS_FIELDS.filter(fk => fk !== 'sent').forEach(fk => { f[fk] = String(entry[fk] || 0); });
     setForm(f); setShowForm(true);
   }
+
+  function openForm() {
+    const todayDate = today();
+    const existingToday = sms.find(s => s.date === todayDate && !s.deleted);
+    if (existingToday && !editId) {
+      startEdit(existingToday);
+      setErr('Today already has an entry — editing it instead.');
+    } else {
+      setForm(blankForm());
+      setEditId(null);
+      setErr('');
+      setShowForm(true);
+    }
+  }
+
+  /* Auto-focus first pipeline form field */
+  useEffect(() => {
+    if (showForm) {
+      setTimeout(() => document.getElementById('pipeline-first-input')?.focus(), 100);
+    }
+  }, [showForm]);
 
   async function submit(e) {
     e.preventDefault(); setSaving(true); setErr('');
     const payload = { date: (form.date || '').trim(), campaignId: form.campaignId || null };
-    SMS_FIELDS.forEach(fk => { payload[fk] = safeNum(form[fk]); });
+    SMS_FIELDS.filter(fk => fk !== 'sent').forEach(fk => { payload[fk] = safeNum(form[fk]); });
     try {
       const url    = editId ? `/api/kpi/sms/${editId}` : '/api/kpi/sms';
       const method = editId ? 'PUT' : 'POST';
@@ -623,12 +661,16 @@ function PipelineTab({ sms, campaigns, settings, onRefresh }) {
     onRefresh();
   }
 
-  // Totals
+  // Totals — 'sent' comes from outreach textsSent, others from sms logs
   const totals = useMemo(() => {
     const t = {};
     SMS_FIELDS.forEach(f => { t[f] = sms.reduce((s, e) => s + safeNum(e[f]), 0); });
     return t;
   }, [sms]);
+
+  const metricsValues = useMemo(() => {
+    return { ...totals, sent: totalTextsSent };
+  }, [totals, totalTextsSent]);
 
   // Weekly data for chart
   const weeks = useMemo(() => {
@@ -645,8 +687,6 @@ function PipelineTab({ sms, campaigns, settings, onRefresh }) {
 
   const maxVal = Math.max(1, ...weeks.map(([, v]) => Math.max(v.offers, v.contracts)));
 
-  const costPreview = safeNum(form.sent || 0) * smsCostPerText;
-
   const inpStyle = { width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' };
 
   return (
@@ -657,11 +697,12 @@ function PipelineTab({ sms, campaigns, settings, onRefresh }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
           {SMS_FIELDS.map(f => (
             <div key={f} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '12px 8px', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{(totals[f] || 0).toLocaleString()}</div>
-              <div style={{ fontSize: 10, color: C.t3, marginTop: 4, textTransform: 'capitalize' }}>{SMS_LABELS[f]}</div>
+              <div style={{ fontSize: 22, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{(metricsValues[f] || 0).toLocaleString()}</div>
+              <div style={{ fontSize: 10, color: C.t3, marginTop: 4, textTransform: 'capitalize' }}>{SMS_LABELS[f]}{f === 'sent' ? ' *' : ''}</div>
             </div>
           ))}
         </div>
+        <div style={{ fontSize: 10, color: C.t3, marginTop: 6 }}>* Texts Sent sourced from Outreach list entries</div>
       </div>
 
       {/* Section 2: Weekly Chart */}
@@ -693,7 +734,7 @@ function PipelineTab({ sms, campaigns, settings, onRefresh }) {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>Daily Log ({sms.length} entries)</div>
-        <button onClick={() => { setShowForm(!showForm); setEditId(null); setForm(blankForm()); setErr(''); }} style={{
+        <button onClick={() => { if (showForm) { setShowForm(false); setEditId(null); setErr(''); } else { openForm(); } }} style={{
           background: C.purple, color: '#fff', border: 'none', borderRadius: 8,
           padding: '8px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 40,
         }}>+ Log Entry</button>
@@ -705,7 +746,7 @@ function PipelineTab({ sms, campaigns, settings, onRefresh }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Date</label>
-              <input type="text" inputMode="numeric" value={form.date || ''} onChange={e => fv('date', e.target.value)} placeholder="YYYY-MM-DD" style={inpStyle} />
+              <input id="pipeline-first-input" type="text" inputMode="numeric" value={form.date || ''} onChange={e => fv('date', e.target.value)} placeholder="YYYY-MM-DD" style={inpStyle} />
             </div>
             <div>
               <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Campaign</label>
@@ -714,18 +755,12 @@ function PipelineTab({ sms, campaigns, settings, onRefresh }) {
                 {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
-            {SMS_FIELDS.map(f => (
+            {SMS_FIELDS.filter(f => f !== 'sent').map(f => (
               <div key={f}>
                 <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>{SMS_LABELS[f]}</label>
                 <input type="text" inputMode="numeric" pattern="[0-9]*" value={form[f] || '0'} onChange={e => fv(f, e.target.value)} style={inpStyle} />
               </div>
             ))}
-          </div>
-          {/* SMS cost preview */}
-          <div style={{ padding: '10px 14px', borderRadius: 8, background: C.purple + '15', border: `1px solid ${C.purple}40`, marginBottom: 12 }}>
-            <span style={{ fontSize: 13, color: C.t2 }}>SMS Cost Preview: </span>
-            <span style={{ fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{fmtCost(costPreview)}</span>
-            <span style={{ fontSize: 12, color: C.t3, marginLeft: 8 }}>({safeNum(form.sent || 0).toLocaleString()} texts × ${smsCostPerText}/text) — auto-deducted from Marketing</span>
           </div>
           {err && <div style={{ color: C.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
           <div style={{ display: 'flex', gap: 10 }}>
@@ -788,7 +823,7 @@ function PipelineTab({ sms, campaigns, settings, onRefresh }) {
 
 // ─── COMBINED TAB ─────────────────────────────────────────────────────────────
 function CombinedTab({ sms, outreach, settings }) {
-  const totalSent          = sms.reduce((s, e) => s + safeNum(e.sent), 0);
+  const totalSent          = outreach.filter(o => !o.deleted).reduce((s, o) => s + safeNum(o.textsSent || 0), 0);
   const totalPosReplies    = sms.reduce((s, e) => s + safeNum(e.positiveReplies), 0);
   const totalWantsToSell   = sms.reduce((s, e) => s + safeNum(e.wantsToSell), 0);
   const totalQualified     = sms.reduce((s, e) => s + safeNum(e.qualified), 0);
@@ -956,7 +991,7 @@ export default function KPIPage() {
 
       {tab === 'campaigns' && <CampaignsTab campaigns={campaigns} outreach={outreach} sms={sms} onRefresh={load} />}
       {tab === 'outreach'  && <OutreachTab  outreach={outreach} sms={sms} campaigns={campaigns} onRefresh={load} />}
-      {tab === 'pipeline'  && <PipelineTab  sms={sms} campaigns={campaigns} settings={settings} onRefresh={load} />}
+      {tab === 'pipeline'  && <PipelineTab  sms={sms} outreach={outreach} campaigns={campaigns} settings={settings} onRefresh={load} />}
       {tab === 'combined'  && <CombinedTab  sms={sms} outreach={outreach} settings={settings} />}
     </div>
   );

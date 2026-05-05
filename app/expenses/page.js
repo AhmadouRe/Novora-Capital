@@ -122,6 +122,10 @@ export default function ExpensesPage() {
   const [accountSaveError, setAccountSaveError] = useState('');
   const [accountSaveSuccess, setAccountSaveSuccess] = useState('');
 
+  /* budget editing */
+  const [editingBudget, setEditingBudget] = useState(null);
+  const [budgetInput, setBudgetInput] = useState('');
+
   /* split allocation */
   const [splits, setSplits] = useState([]);
   const [showAllocationEdit, setShowAllocationEdit] = useState(false);
@@ -170,6 +174,9 @@ export default function ExpensesPage() {
   /* ── auto-log tracking ── */
   const didAutoLogRef = useRef(false);
 
+  /* ── reset check tracking ── */
+  const didResetCheckRef = useRef(false);
+
   /* ── fetch data ── */
   const reload = useCallback(async (skipAutoLog = false) => {
     const [b, e, r] = await Promise.all([
@@ -209,7 +216,17 @@ export default function ExpensesPage() {
   }, []);
 
   useEffect(() => {
-    if (session?.access?.expenses) reload();
+    if (!session?.access?.expenses) return;
+    (async () => {
+      if (!didResetCheckRef.current) {
+        didResetCheckRef.current = true;
+        const settings = await fetch('/api/kpi/settings').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+        if (!settings.expenses_reset_v2) {
+          await fetch('/api/expenses/reset', { method: 'POST' });
+        }
+      }
+      await reload();
+    })();
   }, [session, reload]);
 
   useEffect(() => {
@@ -352,11 +369,37 @@ export default function ExpensesPage() {
       body: JSON.stringify({ account: editingAccount, balance: newBalance }),
     });
     if (res.ok) {
-      setManualBalances(prev => ({ ...prev, [editingAccount]: newBalance }));
       setAccountSaveSuccess('✓ Balance updated');
+      /* H6: refetch from API so balance reflects server state */
+      const fresh = await fetch('/api/expenses/manual-balance').then(r => r.ok ? r.json() : {}).catch(() => ({}));
+      if (fresh?.balances) setManualBalances(fresh.balances);
       setTimeout(() => { cancelAccountEdit(); }, 1800);
     } else {
       setAccountSaveError('Failed to save. Try again.');
+    }
+  }
+
+  /* ── budget (Total Allocated) edit ── */
+  function openBudgetEdit(key) {
+    setEditingBudget(key);
+    setBudgetInput(String(toN(budgets[key]) || ''));
+  }
+
+  function cancelBudgetEdit() {
+    setEditingBudget(null);
+    setBudgetInput('');
+  }
+
+  async function saveBudgetEdit() {
+    const amount = parseFloat(budgetInput) || 0;
+    const res = await fetch('/api/expenses/budgets', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: editingBudget, amount }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.budgets) setBudgets(data.budgets);
+      cancelBudgetEdit();
     }
   }
 
@@ -514,10 +557,35 @@ export default function ExpensesPage() {
                 </div>
 
                 {/* Total Allocated */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <span style={{ fontSize: 12, color: 'var(--text2)' }}>Total Allocated 🔒</span>
-                  <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{fmt(alloc)}</span>
-                </div>
+                {editingBudget === a.key ? (
+                  <div style={{ marginBottom: 8, padding: 10, background: 'var(--surface2)', borderRadius: 8, border: `1px solid ${a.color}44` }}>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 6 }}>Set Total Allocated</div>
+                    <div style={{ display: 'flex', alignItems: 'center', background: 'var(--surface3)', border: '1px solid var(--border)', borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
+                      <span style={{ padding: '0 8px', color: 'var(--text2)', background: 'var(--surface)', borderRight: '1px solid var(--border)', height: 36, display: 'flex', alignItems: 'center', fontSize: 13 }}>$</span>
+                      <input
+                        type="text" inputMode="numeric"
+                        value={budgetInput}
+                        onChange={e => setBudgetInput(e.target.value.replace(/[^0-9.]/g, ''))}
+                        onKeyDown={e => { if (e.key === 'Enter') saveBudgetEdit(); if (e.key === 'Escape') cancelBudgetEdit(); }}
+                        autoFocus
+                        placeholder="0"
+                        style={{ flex: 1, padding: '7px 10px', background: 'transparent', border: 'none', color: 'var(--text)', fontSize: 14, outline: 'none', fontFamily: 'JetBrains Mono,monospace', fontWeight: 700 }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={saveBudgetEdit} style={{ flex: 2, padding: '6px 0', borderRadius: 6, border: 'none', background: 'var(--orange)', color: '#fff', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Save</button>
+                      <button onClick={cancelBudgetEdit} style={{ flex: 1, padding: '6px 0', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text2)', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--text2)' }}>Total Allocated</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{fmt(alloc)}</span>
+                      <button onClick={() => openBudgetEdit(a.key)} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text2)', fontSize: 11, padding: '2px 7px', borderRadius: 4, cursor: 'pointer', fontWeight: 600 }}>Edit</button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Current Balance */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>

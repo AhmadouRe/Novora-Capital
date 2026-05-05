@@ -17,12 +17,13 @@ const SEC={fontSize:13,fontWeight:700,textTransform:'uppercase',letterSpacing:'0
 
 const TIERS=[
   {max:139999,pct:70,label:'Below $140K',color:'var(--cyan)'},
-  {max:189999,pct:73,label:'$140K–$189K',color:'var(--gold)'},
-  {max:239999,pct:75,label:'$190K–$239K',color:'var(--gold)'},
-  {max:289999,pct:78,label:'$240K–$289K',color:'var(--purple)'},
-  {max:Infinity,pct:80,label:'$290K+',color:'var(--green)'},
+  {max:179999,pct:73,label:'$140K–$179K',color:'var(--gold)'},
+  {max:229999,pct:75,label:'$180K–$229K',color:'var(--gold)'},
+  {max:279999,pct:78,label:'$230K–$279K',color:'var(--purple)'},
+  {max:Infinity,pct:80,label:'$280K+',color:'var(--green)'},
 ];
 const getTier=arv=>TIERS.find(t=>arv<=t.max)||TIERS[TIERS.length-1];
+function getTierPct(arv){if(arv<140000)return 0.70;if(arv<180000)return 0.73;if(arv<230000)return 0.75;if(arv<280000)return 0.78;return 0.80;}
 
 // New rehab system
 const REHAB_TIERS=['Cosmetic','Light','Medium','Major Rehab','Full Gut'];
@@ -134,22 +135,24 @@ export default function OfferGenerator(){
   const rehabBase=rehabRate*sqftN;
   const majorTotal=MAJOR_ITEMS.reduce((s,m)=>s+(majors[m.id]?getMajorAmt(m):0),0);
   const totalRehab=rehabBase+majorTotal;
-  const feeN=toN(aFee);
-  const cushN=toN(cushion);
-  const mao=finalArv>0&&tier?Math.round(finalArv*(tier.pct/100)-totalRehab-feeN-cushN):0;
-  const laoRaw=Math.round(mao*0.70);
-  const lao=Math.max(35000,laoRaw);
-  const laoFloored=laoRaw<35000;
+  const feeN=toN(aFee)||12000;
+  const cushN=toN(cushion)||5000;
+  const safeARV=isNaN(finalArv)||!isFinite(finalArv)?0:finalArv;
+  const safeRehab=isNaN(totalRehab)||!isFinite(totalRehab)?0:totalRehab;
+  const tierPctCalc=getTierPct(safeARV);
+  const mao=safeARV>0?Math.round(safeARV*tierPctCalc-safeRehab-feeN-cushN):0;
+  const lao=Math.round(mao*0.70);
+  const walkAway=mao-15000;
   const askN=toN(asking);
   const gap=askN>0?askN-mao:null;
-  const canShow=validComps.length>=2&&selectedTier&&selectedSeverity&&sqftN>0&&finalArv>0;
+  const canShow=finalArv>0&&sqftN>0&&selectedTier&&selectedSeverity;
   const sqftWarning=sqftN>0&&(sqftN<750||sqftN>2500);
-  let vWord='',vBg='',vBdr='',vCol='',vSub='';
+  let vGrade='',vWord='',vBg='',vBdr='',vCol='',vSub='';
   if(canShow){
-    if(mao>=12000){vWord='STRONG';vBg='var(--green-faint)';vBdr='var(--green-border)';vCol='var(--green)';}
-    else if(mao>=6000){vWord='VIABLE';vBg='var(--gold-faint)';vBdr='var(--gold-border)';vCol='var(--gold)';}
-    else if(mao>=1){vWord='TIGHT';vBg='var(--orange-faint)';vBdr='var(--orange-border)';vCol='var(--orange)';vSub='Seller must move significantly or deal is not viable.';}
-    else{vWord='DEAD';vBg='var(--red-faint)';vBdr='var(--red-border)';vCol='var(--red)';vSub='Numbers do not work at any negotiation point.';}
+    if(mao>=12000){vGrade='STRONG';vWord='STRONG DEAL ✓';vBg='var(--green-faint)';vBdr='var(--green-border)';vCol='var(--green)';}
+    else if(mao>=6000){vGrade='VIABLE';vWord='VIABLE DEAL ✓';vBg='var(--gold-faint)';vBdr='var(--gold-border)';vCol='var(--gold)';}
+    else if(mao>=1){vGrade='TIGHT';vWord='TIGHT — Review';vBg='var(--orange-faint)';vBdr='var(--orange-border)';vCol='var(--orange)';vSub='Seller must move significantly or deal is not viable.';}
+    else{vGrade='DEAD';vWord='DEAD — Does Not Work';vBg='var(--red-faint)';vBdr='var(--red-border)';vCol='var(--red)';vSub='Numbers do not work at any negotiation point.';}
   }
 
   // Novation
@@ -181,7 +184,7 @@ export default function OfferGenerator(){
       const d=daysDiff(c.date);const pps=toN(c.sqft)>0?Math.round(toN(c.price)/toN(c.sqft)):0;
       return `  Comp ${i+1}: ${fmt(toN(c.price))} | ${toN(c.sqft)||'?'} sqft | $${pps}/sqft | ${d!==null?d+' days ago':'no date'}`;
     }).join('\n');
-    return `OFFER GENERATOR — NOVORA CAPITAL\nDate: ${todayISO()} | Exit: Assignment\nPROPERTY: ${address||'—'} | Sqft: ${sqftN||'?'} | Condition: ${condLabel} | Major Items: ${majorList} | Total Rehab: ${fmt(totalRehab)}\nCOMPS (${validComps.length} valid of 4 entered):\n${compLines}\nARV: ${fmt(finalArv)} (${usingOverride?'Manual Override':'Auto'}) | Tier: ${tier?.pct}% (${tier?.label}) | Confidence: ${conf}\nMAO: ${fmt(mao)} | LAO: ${fmt(lao)} | Negotiation Room: ${fmt(mao-lao)}\n${askN?`SELLER ASKING: ${fmt(askN)} | GAP: ${gap<=0?`+${fmt(-gap)} below your ceiling`:`-${fmt(gap)} above your ceiling`}`:''}${hasOutlier?'\n⚠ High comp variance — one or more comps deviated significantly.':''}${majors.foundation?'\n⚠ Foundation work in scope — verify with contractor.':''}${laoFloored?'\nℹ LAO floor applied — floored at $35,000.':''}\nVERDICT: ${vWord}`.trim();
+    return `OFFER GENERATOR — NOVORA CAPITAL\nDate: ${todayISO()} | Exit: Assignment\nPROPERTY: ${address||'—'} | Sqft: ${sqftN||'?'} | Condition: ${condLabel} | Major Items: ${majorList} | Total Rehab: ${fmt(totalRehab)}\nCOMPS (${validComps.length} valid of 4 entered):\n${compLines}\nARV: ${fmt(finalArv)} (${usingOverride?'Manual Override':'Auto'}) | Tier: ${Math.round(tierPctCalc*100)}% | Confidence: ${conf}\nMAO: ${fmt(mao)} | Open At: ${fmt(lao)} | Walk Away At: ${fmt(walkAway)}\n${askN?`SELLER ASKING: ${fmt(askN)} | GAP: ${gap<=0?`+${fmt(-gap)} below your ceiling`:`-${fmt(gap)} above your ceiling`}`:''}${hasOutlier?'\n⚠ High comp variance — one or more comps deviated significantly.':''}${majors.foundation?'\n⚠ Foundation work in scope — verify with contractor.':''}\nVERDICT: ${vGrade}`.trim();
   }
 
   function buildNovBrief(){
@@ -191,7 +194,7 @@ export default function OfferGenerator(){
 
   async function copyBrief(){
     await navigator.clipboard.writeText(mode==='novation'?buildNovBrief():buildBrief());
-    const shouldSave = mode==='novation'?(novV==='STRONG'||novV==='VIABLE'):(vWord==='STRONG'||vWord==='VIABLE');
+    const shouldSave = mode==='novation'?(novV==='STRONG'||novV==='VIABLE'):(vGrade==='STRONG'||vGrade==='VIABLE');
     if(shouldSave){
       await fetch('/api/calculator/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({address,arv:finalArv,mao,verdict:mode==='novation'?novV:vWord,confidence:conf,mode,date:todayISO()})});
       fetch('/api/calculator/history').then(r=>r.json()).then(d=>{if(Array.isArray(d))setHistory(d);});
@@ -440,7 +443,7 @@ export default function OfferGenerator(){
               </div>
             </div>
 
-            {!canShow&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'32px',textAlign:'center',color:'var(--text2)',fontSize:15}}>Enter sqft, add 2+ comps, and select a condition to generate your offer.</div>}
+            {!canShow&&<div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'32px',textAlign:'center',color:'var(--text2)',fontSize:15}}>Enter sqft and select a rehab tier and severity to generate your offer. Add comps or enter an ARV override above.</div>}
 
             {canShow&&(
               <>
@@ -452,7 +455,7 @@ export default function OfferGenerator(){
 
                 <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:14,padding:'20px 24px',marginBottom:16}}>
                   <div style={SEC}>MAO Breakdown</div>
-                  {[{l:`ARV × ${tier?.pct}%`,v:Math.round(finalArv*(tier?.pct/100)),c:'var(--text)'},{l:'Minus Rehab',v:-totalRehab,c:'var(--red)'},{l:'Minus Assignment Fee',v:-feeN,c:'var(--red)'},{l:'Minus Safety Cushion',v:-cushN,c:'var(--red)'}].map((row,i)=>(
+                  {[{l:`ARV × ${Math.round(tierPctCalc*100)}%`,v:Math.round(safeARV*tierPctCalc),c:'var(--text)'},{l:'Minus Rehab',v:-safeRehab,c:'var(--red)'},{l:'Minus Assignment Fee',v:-feeN,c:'var(--red)'},{l:'Minus Safety Cushion',v:-cushN,c:'var(--red)'}].map((row,i)=>(
                     <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'10px 0',borderBottom:'1px solid var(--border)'}}>
                       <span style={{color:'var(--text2)',fontSize:15}}>{row.l}</span>
                       <span style={{fontFamily:'JetBrains Mono,monospace',color:row.c,fontSize:15,fontWeight:600}}>{row.v<0?`-${fmt(-row.v)}`:fmt(row.v)}</span>
@@ -469,7 +472,7 @@ export default function OfferGenerator(){
                 </div>
 
                 <div style={{display:'grid',gridTemplateColumns:isMobile?'1fr':'1fr 1fr 1fr',gap:12,marginBottom:8}}>
-                  {[{l:'MAO',s:'Never exceed this ceiling',v:mao,c:'var(--gold)'},{l:'LAO — Open Here',s:'Start negotiations here',v:lao,c:'var(--cyan)'},{l:'Negotiation Room',s:'Room to negotiate',v:mao-lao,c:'var(--text2)'}].map(card=>(
+                  {[{l:'MAO — Ceiling',s:'Never exceed this',v:mao,c:'var(--gold)'},{l:'Open Here',s:'Start negotiations at LAO',v:lao,c:'var(--cyan)'},{l:'Walk Away At',s:'Do not go below this',v:walkAway,c:'var(--text2)'}].map(card=>(
                     <div key={card.l} style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:12,padding:16,textAlign:'center'}}>
                       <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',color:card.c,marginBottom:6}}>{card.l}</div>
                       <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:card.c,marginBottom:4}}>{fmt(card.v)}</div>
@@ -477,13 +480,12 @@ export default function OfferGenerator(){
                     </div>
                   ))}
                 </div>
-                <div style={{textAlign:'center',fontSize:13,color:'var(--text3)',marginBottom:16}}>Never exceed MAO. Open at LAO. You have {fmt(mao-lao)} of negotiation room.</div>
+                <div style={{textAlign:'center',fontSize:13,color:'var(--text3)',marginBottom:16}}>Never exceed MAO. Open at LAO ({fmt(lao)}). Walk away if below {fmt(walkAway)}.</div>
 
-                {(hasOutlier||majors.foundation||laoFloored)&&(
+                {(hasOutlier||majors.foundation)&&(
                   <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:16}}>
                     {hasOutlier&&<div style={{padding:'12px 16px',borderRadius:10,background:'var(--orange-faint)',border:'1px solid var(--orange-border)',color:'var(--orange)',fontSize:13}}>⚠ High comp variance — one or more comps deviated significantly from the group. ARV confidence reduced.</div>}
                     {majors.foundation&&<div style={{padding:'12px 16px',borderRadius:10,background:'var(--orange-faint)',border:'1px solid var(--orange-border)',color:'var(--orange)',fontSize:13}}>⚠ Foundation work in scope — verify with contractor before delivering this offer</div>}
-                    {laoFloored&&<div style={{padding:'12px 16px',borderRadius:10,background:'var(--gold-faint)',border:'1px solid var(--gold-border)',color:'var(--gold)',fontSize:13}}>ℹ LAO floor applied — calculated LAO was below $35,000, floored at $35,000</div>}
                   </div>
                 )}
 
@@ -502,7 +504,7 @@ export default function OfferGenerator(){
                 <button onClick={copyBrief} style={{width:'100%',minHeight:52,borderRadius:10,border:'none',background:vCol,color:'#000',fontWeight:800,fontSize:15,cursor:'pointer',marginBottom:10,transition:'all 0.15s'}}>
                   {copied==='saved'?'✓ Copied & Saved':copied?'✓ Copied to Clipboard':'Copy Deal Brief'}
                 </button>
-                {(vWord==='STRONG'||vWord==='VIABLE')&&(
+                {(vGrade==='STRONG'||vGrade==='VIABLE')&&(
                   <button onClick={saveHist} style={{width:'100%',minHeight:46,borderRadius:10,border:'1px solid var(--border)',background:'var(--surface3)',color:'var(--text2)',fontWeight:700,fontSize:14,cursor:'pointer'}}>
                     {savedMsg||'Save to History'}
                   </button>

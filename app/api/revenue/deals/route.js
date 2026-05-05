@@ -65,6 +65,15 @@ export async function POST(request) {
     }
     await saveItem('nc:expenses:budgets', budgets);
 
+    /* bump manual_balances for marketing + operating so current balance reflects new revenue */
+    const manualBalances = await getItem('nc:expenses:manual_balances') || {};
+    for (const key of ['marketing', 'operating']) {
+      if (splitAmounts[key] > 0) {
+        manualBalances[key] = (typeof manualBalances[key] === 'number' ? manualBalances[key] : 0) + splitAmounts[key];
+      }
+    }
+    await saveItem('nc:expenses:manual_balances', manualBalances);
+
     /* create one auto-expense entry per split account */
     let expenseList = await getList('nc:expenses:entries');
     expenseList = purgeOldDeleted(expenseList);

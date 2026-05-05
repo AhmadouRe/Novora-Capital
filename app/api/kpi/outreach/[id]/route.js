@@ -6,10 +6,16 @@ import { writeAudit } from '../../../../lib/audit.js';
 export const dynamic = 'force-dynamic';
 
 const KEY = 'nc:kpi:outreach';
-const SETTINGS_KEY = 'nc:kpi:settings';
+const LIST_TYPES = ['Pre-Foreclosure', 'Vacant', 'Tired Landlords', 'Probate', 'Tax Delinquent', 'Other'];
 
 function clean(v) {
   return typeof v === 'string' ? v.trim() : '';
+}
+
+function parseCounties(raw) {
+  if (Array.isArray(raw)) return raw.map(c => String(c).trim()).filter(Boolean);
+  if (typeof raw === 'string') return raw.split(',').map(s => s.trim()).filter(Boolean);
+  return [];
 }
 
 export async function PUT(request, { params }) {
@@ -23,19 +29,12 @@ export async function PUT(request, { params }) {
 
   const updates = {};
   if (body.listName !== undefined) updates.listName = clean(body.listName);
-  if (body.county !== undefined) updates.county = clean(body.county);
+  if (body.listType !== undefined) updates.listType = LIST_TYPES.includes(body.listType) ? body.listType : 'Other';
+  if (body.counties !== undefined) updates.counties = parseCounties(body.counties);
   if (body.campaignId !== undefined) updates.campaignId = body.campaignId || null;
-  if (body.status !== undefined) updates.status = body.status;
-  if (body.totalReplies !== undefined) updates.totalReplies = Number(body.totalReplies) || 0;
-  if (body.positiveReplies !== undefined) updates.positiveReplies = Number(body.positiveReplies) || 0;
-
-  if (body.contacts !== undefined) {
-    const contacts = Number(body.contacts) || 0;
-    const settings = (await kv.get(SETTINGS_KEY)) || {};
-    const smsCostPerText = typeof settings.smsCostPerText === 'number' ? settings.smsCostPerText : 0.04;
-    updates.contacts = contacts;
-    updates.cost = Math.round(contacts * smsCostPerText * 100) / 100;
-  }
+  if (body.status !== undefined) updates.status = body.status === 'Complete' ? 'Complete' : 'Active';
+  if (body.contacts !== undefined) updates.contacts = Number(body.contacts) || 0;
+  if (body.date !== undefined) updates.date = clean(body.date);
 
   list[idx] = { ...list[idx], ...updates, updatedAt: new Date().toISOString() };
   await kv.set(KEY, list);
@@ -51,7 +50,7 @@ export async function DELETE(request, { params }) {
   const idx = list.findIndex(e => e.id === params.id);
   if (idx === -1) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  list.splice(idx, 1);
+  list[idx] = { ...list[idx], deleted: true, deletedAt: new Date().toISOString() };
   await kv.set(KEY, list);
   await writeAudit(session.userId, session.userName, 'novora-capital', 'OUTREACH_DELETED', params.id);
   return NextResponse.json({ success: true });

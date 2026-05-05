@@ -24,19 +24,16 @@ const TIERS=[
 ];
 const getTier=arv=>TIERS.find(t=>arv<=t.max)||TIERS[TIERS.length-1];
 
-function rehabBracket(sqftN){
-  if(!sqftN||sqftN<=0) return {moveIn:null,light:null,medium:null,full:null,ranges:true};
-  if(sqftN<1500) return {moveIn:8000,light:15000,medium:35000,full:60000};
-  if(sqftN<=2000) return {moveIn:12000,light:25000,medium:45000,full:75000};
-  return {moveIn:15000,light:35000,medium:60000,full:90000};
-}
-const roofAmt=sqft=>!sqft||sqft<1500?10000:sqft<=2000?12000:15000;
+// New rehab system
+const REHAB_TIERS=['Cosmetic','Light','Medium','Major Rehab','Full Gut'];
+const SEVERITIES=['Low','Mid','High'];
+const RATE_TABLE={'Cosmetic':{Low:8,Mid:10,High:15},'Light':{Low:15,Mid:20,High:25},'Medium':{Low:25,Mid:35,High:50},'Major Rehab':{Low:50,Mid:60,High:70},'Full Gut':{Low:75,Mid:85,High:100}};
 const MAJOR_ITEMS=[
   {id:'roof',label:'Roof',dynamic:true},
-  {id:'hvac',label:'HVAC',amount:10000},
-  {id:'foundation',label:'Foundation',amount:20000,warn:true},
-  {id:'plumbing',label:'Plumbing',amount:10000},
-  {id:'electrical',label:'Electrical',amount:10000},
+  {id:'hvac',label:'HVAC',dynamic:true},
+  {id:'foundation',label:'Foundation',editable:true,warn:true,defaultAmt:20000},
+  {id:'plumbing',label:'Plumbing',editable:true,defaultAmt:10000},
+  {id:'electrical',label:'Electrical',editable:true,defaultAmt:10000},
 ];
 const EMPTY_COMP={price:'',sqft:'',date:''};
 
@@ -86,8 +83,12 @@ export default function OfferGenerator(){
   const [asking,setAsking]=useState('');
   const [comps,setComps]=useState([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);
   const [arvOverride,setArvOverride]=useState('');
-  const [condition,setCondition]=useState(null);
+  const [selectedTier,setSelectedTier]=useState(null);
+  const [selectedSeverity,setSelectedSeverity]=useState(null);
   const [majors,setMajors]=useState({});
+  const [foundationAmt,setFoundationAmt]=useState('20000');
+  const [plumbingAmt,setPlumbingAmt]=useState('10000');
+  const [electricalAmt,setElectricalAmt]=useState('10000');
   const [aFee,setAFee]=useState('12000');
   const [cushion,setCushion]=useState('5000');
 
@@ -104,7 +105,16 @@ export default function OfferGenerator(){
   useEffect(()=>{fetch('/api/calculator/history').then(r=>r.json()).then(d=>{if(Array.isArray(d))setHistory(d);}).catch(()=>{});},[]);
 
   const sqftN=toN(sqft);
-  const rb=rehabBracket(sqftN);
+
+  // helper to get major item amount
+  function getMajorAmt(m){
+    if(m.id==='roof') return sqftN>0?Math.round((sqftN*7)/500)*500:7000;
+    if(m.id==='hvac') return sqftN>0&&sqftN<1400?8000:12000;
+    if(m.id==='foundation') return toN(foundationAmt)||20000;
+    if(m.id==='plumbing') return toN(plumbingAmt)||10000;
+    if(m.id==='electrical') return toN(electricalAmt)||10000;
+    return 0;
+  }
 
   // Assignment ARV
   const validComps=comps.filter(c=>{const d=daysDiff(c.date);return toN(c.price)>0&&(d===null||d<=365);});
@@ -120,8 +130,9 @@ export default function OfferGenerator(){
   if(hasOutlier&&conf==='HIGH')conf='MEDIUM'; else if(hasOutlier&&conf==='MEDIUM')conf='LOW';
   const confColor=conf==='HIGH'?'var(--green)':conf==='MEDIUM'?'var(--gold)':'var(--red)';
   const tier=finalArv>0?getTier(finalArv):null;
-  const rehabBase=condition&&!rb.ranges?rb[condition]||0:0;
-  const majorTotal=MAJOR_ITEMS.reduce((s,m)=>s+(majors[m.id]?(m.dynamic?roofAmt(sqftN):m.amount||0):0),0);
+  const rehabRate=(selectedTier&&selectedSeverity&&RATE_TABLE[selectedTier])?RATE_TABLE[selectedTier][selectedSeverity]||0:0;
+  const rehabBase=rehabRate*sqftN;
+  const majorTotal=MAJOR_ITEMS.reduce((s,m)=>s+(majors[m.id]?getMajorAmt(m):0),0);
   const totalRehab=rehabBase+majorTotal;
   const feeN=toN(aFee);
   const cushN=toN(cushion);
@@ -131,7 +142,8 @@ export default function OfferGenerator(){
   const laoFloored=laoRaw<35000;
   const askN=toN(asking);
   const gap=askN>0?askN-mao:null;
-  const canShow=validComps.length>=2&&condition&&sqftN>0&&finalArv>0;
+  const canShow=validComps.length>=2&&selectedTier&&selectedSeverity&&sqftN>0&&finalArv>0;
+  const sqftWarning=sqftN>0&&(sqftN<750||sqftN>2500);
   let vWord='',vBg='',vBdr='',vCol='',vSub='';
   if(canShow){
     if(mao>=12000){vWord='STRONG';vBg='var(--green-faint)';vBdr='var(--green-border)';vCol='var(--green)';}
@@ -162,8 +174,8 @@ export default function OfferGenerator(){
   if(activeALP>0){if(spread>=20000){novV='STRONG';novVC='var(--green)';}else if(spread>=12000){novV='VIABLE';novVC='var(--gold)';}else if(spread>=6000){novV='TIGHT';novVC='var(--orange)';}else{novV='DEAD';novVC='var(--red)';}}
 
   function buildBrief(){
-    const condLabel={'moveIn':'Move-In Ready','light':'Light Rehab','medium':'Medium Rehab','full':'Full Gut'}[condition]||'';
-    const majorList=MAJOR_ITEMS.filter(m=>majors[m.id]).map(m=>m.label).join(', ')||'None';
+    const condLabel=selectedTier&&selectedSeverity?`${selectedTier} / ${selectedSeverity} ($${rehabRate}/sqft)`:'Not selected';
+    const majorList=MAJOR_ITEMS.filter(m=>majors[m.id]).map(m=>`${m.label} (+${fmt(getMajorAmt(m))})`).join(', ')||'None';
     const compLines=comps.map((c,i)=>{
       if(!toN(c.price))return `  Comp ${i+1}: —`;
       const d=daysDiff(c.date);const pps=toN(c.sqft)>0?Math.round(toN(c.price)/toN(c.sqft)):0;
@@ -201,7 +213,8 @@ export default function OfferGenerator(){
     setAddress(h.address||'');
     setArvOverride(h.arv?String(h.arv):'');
     if(h.sqft) setSqft(String(h.sqft));
-    if(h.condition) setCondition(h.condition);
+    if(h.selectedTier) setSelectedTier(h.selectedTier);
+    if(h.selectedSeverity) setSelectedSeverity(h.selectedSeverity);
     if(h.majors) setMajors(h.majors);
     if(h.aFee) setAFee(String(h.aFee));
     if(h.cushion) setCushion(String(h.cushion));
@@ -217,8 +230,6 @@ export default function OfferGenerator(){
     setHistory(hs=>hs.filter(h=>h.id!==id));
     setDeletingHistId(null);
   }
-
-  const condBtns=[{k:'moveIn',l:'Move-In Ready',d:'Cosmetic updates only'},{k:'light',l:'Light Rehab',d:'Flooring, paint, fixtures'},{k:'medium',l:'Medium Rehab',d:'Kitchen, bath, systems'},{k:'full',l:'Full Gut',d:'Complete renovation'}];
 
   const p=isMobile?16:24;
 
@@ -269,7 +280,7 @@ export default function OfferGenerator(){
             <span style={{color:'var(--text)',fontSize:14}}>Switch to {switchConfirm}? Current inputs will be cleared.</span>
             <div style={{display:'flex',gap:8}}>
               <button onClick={()=>setSwitchConfirm(null)} style={{padding:'8px 16px',borderRadius:8,border:'1px solid var(--border)',background:'transparent',color:'var(--text3)',cursor:'pointer',fontSize:13}}>Cancel</button>
-              <button onClick={()=>{setMode(switchConfirm);setSwitchConfirm(null);setComps([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);setNovComps([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);setAsking('');setArvOverride('');setCondition(null);setMajors({});}} style={{padding:'8px 16px',borderRadius:8,border:'none',background:'var(--gold)',color:'#000',fontWeight:700,cursor:'pointer',fontSize:13}}>Switch</button>
+              <button onClick={()=>{setMode(switchConfirm);setSwitchConfirm(null);setComps([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);setNovComps([EMPTY_COMP,EMPTY_COMP,EMPTY_COMP,EMPTY_COMP]);setAsking('');setArvOverride('');setSelectedTier(null);setSelectedSeverity(null);setMajors({});setFoundationAmt('20000');setPlumbingAmt('10000');setElectricalAmt('10000');}} style={{padding:'8px 16px',borderRadius:8,border:'none',background:'var(--gold)',color:'#000',fontWeight:700,cursor:'pointer',fontSize:13}}>Switch</button>
             </div>
           </div>
         )}
@@ -329,30 +340,90 @@ export default function OfferGenerator(){
 
             <div style={CARD}>
               <div style={SEC}>Property Condition</div>
-              <div style={{fontSize:13,color:'var(--text3)',marginBottom:14}}>Rehab brackets auto-sized to your subject property sqft.</div>
-              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
-                {condBtns.map(({k,l,d})=>{
-                  const amt=rb.ranges?null:rb[k];
-                  const disp=rb.ranges?({moveIn:'$8K–$15K',light:'$15K–$35K',medium:'$35K–$60K',full:'$60K–$90K'}[k]):fmt(amt);
-                  return <div key={k} onClick={()=>setCondition(k)} style={{background:condition===k?'var(--gold-faint)':'var(--surface3)',border:`2px solid ${condition===k?'var(--gold)':'var(--border)'}`,borderRadius:12,padding:16,cursor:'pointer',transition:'all 0.15s'}}>
-                    <div style={{fontWeight:700,color:'var(--text)',fontSize:15,marginBottom:6}}>{l}</div>
-                    <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,color:'var(--gold)',fontWeight:700,marginBottom:6}}>{disp}</div>
-                    <div style={{fontSize:12,color:'var(--text3)'}}>{d}</div>
-                  </div>;
+              {sqftWarning&&<div style={{padding:'10px 14px',borderRadius:8,background:'var(--gold-faint)',border:'1px solid var(--gold-border)',color:'var(--gold)',fontSize:13,marginBottom:14}}>⚠ Sqft is {sqftN<750?'below 750':'above 2,500'} — verify before finalizing</div>}
+
+              {/* Tier buttons */}
+              <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)',marginBottom:10}}>Rehab Tier</div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:20}}>
+                {REHAB_TIERS.map(t=>(
+                  <div key={t} onClick={()=>{setSelectedTier(t);setSelectedSeverity(null);}} style={{padding:'10px 16px',borderRadius:8,border:`2px solid ${selectedTier===t?'var(--gold)':'var(--border)'}`,background:selectedTier===t?'var(--gold-faint)':'var(--surface3)',color:selectedTier===t?'var(--gold)':'var(--text2)',cursor:'pointer',fontSize:14,fontWeight:600,transition:'all 0.15s'}}>
+                    {t}
+                  </div>
+                ))}
+              </div>
+
+              {/* Severity buttons */}
+              {selectedTier&&(
+                <>
+                  <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)',marginBottom:10}}>Severity</div>
+                  <div style={{display:'flex',gap:8,marginBottom:12}}>
+                    {SEVERITIES.map(sv=>{
+                      const rate=RATE_TABLE[selectedTier]?.[sv];
+                      const isSelected=selectedSeverity===sv;
+                      return(
+                        <div key={sv} onClick={()=>setSelectedSeverity(sv)} style={{flex:1,padding:'12px 8px',borderRadius:8,border:`2px solid ${isSelected?'var(--gold)':'var(--border)'}`,background:isSelected?'var(--gold-faint)':'var(--surface3)',cursor:'pointer',textAlign:'center',transition:'all 0.15s'}}>
+                          <div style={{fontWeight:700,color:isSelected?'var(--gold)':'var(--text)',fontSize:15,marginBottom:4}}>{sv}</div>
+                          <div style={{fontFamily:'JetBrains Mono,monospace',fontSize:13,color:isSelected?'var(--gold)':'var(--text3)'}}>${rate}/sqft</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* Always-High warning */}
+                  <div style={{padding:'12px 16px',borderRadius:8,background:'var(--gold-faint)',border:'1px solid var(--gold-border)',color:'var(--gold)',fontSize:13,marginBottom:20,fontWeight:600}}>
+                    ⚠ Always select <strong>High</strong> — underestimating rehab is the #1 deal killer.
+                  </div>
+                  {selectedSeverity&&sqftN>0&&(
+                    <div style={{marginBottom:16,fontSize:13,color:'var(--text2)'}}>
+                      Base Rehab: <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:18,fontWeight:700,color:'var(--gold)'}}>{fmt(rehabBase)}</span>
+                      <span style={{fontSize:12,color:'var(--text3)',marginLeft:8}}>(${rehabRate}/sqft × {fmtN(sqftN)} sqft)</span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Major items */}
+              <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)',marginBottom:10}}>Major Items — tap to add</div>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:12}}>
+                {MAJOR_ITEMS.map(m=>{
+                  const on=majors[m.id];
+                  const amt=getMajorAmt(m);
+                  return(
+                    <div key={m.id} onClick={()=>setMajors(x=>({...x,[m.id]:!x[m.id]}))} style={{padding:'10px 16px',borderRadius:8,border:`1px solid ${on?'var(--gold-border)':'var(--border)'}`,background:on?'var(--gold-faint)':'var(--surface3)',color:on?'var(--gold)':'var(--text2)',cursor:'pointer',fontSize:14,fontWeight:600,transition:'all 0.15s'}}>
+                      {m.label}{on?` (+${fmt(amt)})`:''}</div>
+                  );
                 })}
               </div>
-              {rb.ranges&&<div style={{fontSize:12,color:'var(--text3)',marginBottom:12}}>Enter sqft above for exact amounts.</div>}
-              <div style={{fontSize:12,fontWeight:700,textTransform:'uppercase',letterSpacing:'0.08em',color:'var(--text3)',marginBottom:10}}>Major Items — tap to add</div>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:8}}>
-                {MAJOR_ITEMS.map(m=>{const on=majors[m.id];const amt=m.dynamic?roofAmt(sqftN):m.amount||0;return(
-                  <div key={m.id} onClick={()=>setMajors(x=>({...x,[m.id]:!x[m.id]}))} style={{padding:'10px 16px',borderRadius:8,border:`1px solid ${on?'var(--gold-border)':'var(--border)'}`,background:on?'var(--gold-faint)':'var(--surface3)',color:on?'var(--gold)':'var(--text2)',cursor:'pointer',fontSize:14,fontWeight:600,transition:'all 0.15s'}}>
-                    {m.label}{on?` (+${fmt(amt)})`:''}</div>
-                );})}
-              </div>
-              {Object.values(majors).every(v=>!v)&&<div style={{fontSize:12,color:'var(--text3)',marginBottom:16}}>None selected</div>}
-              {!Object.values(majors).every(v=>!v)&&<div style={{marginBottom:16}}/>}
+              {/* Editable amounts for toggled editable items */}
+              {(majors.foundation||majors.plumbing||majors.electrical)&&(
+                <div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:12}}>
+                  {majors.foundation&&(
+                    <div style={{display:'flex',alignItems:'center',gap:6,padding:'8px 12px',borderRadius:8,background:'var(--surface3)',border:'1px solid var(--border)'}}>
+                      <span style={{fontSize:12,color:'var(--text2)'}}>Foundation $</span>
+                      <input type="text" inputMode="numeric" value={foundationAmt} onChange={e=>setFoundationAmt(e.target.value.replace(/[^0-9]/g,''))} style={{width:80,fontFamily:'JetBrains Mono,monospace',fontSize:14,fontWeight:700,background:'transparent',border:'none',color:'var(--gold)',outline:'none'}}/>
+                    </div>
+                  )}
+                  {majors.plumbing&&(
+                    <div style={{display:'flex',alignItems:'center',gap:6,padding:'8px 12px',borderRadius:8,background:'var(--surface3)',border:'1px solid var(--border)'}}>
+                      <span style={{fontSize:12,color:'var(--text2)'}}>Plumbing $</span>
+                      <input type="text" inputMode="numeric" value={plumbingAmt} onChange={e=>setPlumbingAmt(e.target.value.replace(/[^0-9]/g,''))} style={{width:80,fontFamily:'JetBrains Mono,monospace',fontSize:14,fontWeight:700,background:'transparent',border:'none',color:'var(--gold)',outline:'none'}}/>
+                    </div>
+                  )}
+                  {majors.electrical&&(
+                    <div style={{display:'flex',alignItems:'center',gap:6,padding:'8px 12px',borderRadius:8,background:'var(--surface3)',border:'1px solid var(--border)'}}>
+                      <span style={{fontSize:12,color:'var(--text2)'}}>Electrical $</span>
+                      <input type="text" inputMode="numeric" value={electricalAmt} onChange={e=>setElectricalAmt(e.target.value.replace(/[^0-9]/g,''))} style={{width:80,fontFamily:'JetBrains Mono,monospace',fontSize:14,fontWeight:700,background:'transparent',border:'none',color:'var(--gold)',outline:'none'}}/>
+                    </div>
+                  )}
+                </div>
+              )}
               {majors.foundation&&<div style={{padding:'10px 14px',borderRadius:8,background:'var(--orange-faint)',border:'1px solid var(--orange-border)',color:'var(--orange)',fontSize:13,marginBottom:12}}>⚠ Foundation work detected — verify scope with contractor before finalizing offer</div>}
-              <div style={{fontSize:13,color:'var(--text2)'}}>Total Rehab: <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--gold)'}}>{fmt(totalRehab)}</span></div>
+
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10}}>
+                <div style={{fontSize:13,color:'var(--text2)'}}>Total Rehab: <span style={{fontFamily:'JetBrains Mono,monospace',fontSize:22,fontWeight:800,color:'var(--gold)'}}>{fmt(totalRehab)}</span></div>
+                {(selectedTier||Object.values(majors).some(Boolean))&&(
+                  <button onClick={()=>{setSelectedTier(null);setSelectedSeverity(null);setMajors({});setFoundationAmt('20000');setPlumbingAmt('10000');setElectricalAmt('10000');}} style={{padding:'7px 14px',borderRadius:7,border:'1px solid var(--border)',background:'var(--surface3)',color:'var(--text3)',fontSize:12,cursor:'pointer',fontWeight:600}}>↺ Reset</button>
+                )}
+              </div>
             </div>
 
             <div style={CARD}>

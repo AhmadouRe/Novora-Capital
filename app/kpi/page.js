@@ -124,29 +124,25 @@ function TabBar({ tabs, active, onChange }) {
 }
 
 // ─── Today Strip ──────────────────────────────────────────────────────────────
-function TodayStrip({ wcl, sms, outreach }) {
+function TodayStrip({ sms }) {
   const todayStr = today();
-  const wToday = wcl.filter(e => e.date === todayStr);
   const sToday = sms.filter(e => e.date === todayStr);
-  const oToday = outreach.filter(e => e.date === todayStr);
 
-  const wclReceived      = wToday.reduce((s, e) => s + safeNum(e.received), 0);
-  const wclConversations = wToday.reduce((s, e) => s + safeNum(e.conversations), 0);
-  const smsConversations = sToday.reduce((s, e) => s + safeNum(e.conversations), 0);
-  const outContacts      = oToday.reduce((s, e) => s + safeNum(e.contacts), 0);
+  const nums = [
+    { label: 'Sent Today',         value: sToday.reduce((s, e) => s + safeNum(e.sent), 0),            color: C.purple },
+    { label: '+Replies Today',     value: sToday.reduce((s, e) => s + safeNum(e.positiveReplies), 0), color: C.green  },
+    { label: 'Wants to Sell Today',value: sToday.reduce((s, e) => s + safeNum(e.wantsToSell), 0),     color: C.cyan   },
+    { label: 'Qualified Today',    value: sToday.reduce((s, e) => s + safeNum(e.qualified), 0),        color: C.gold   },
+    { label: 'Offers Today',       value: sToday.reduce((s, e) => s + safeNum(e.offers), 0),           color: C.orange },
+  ];
 
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10,
+      display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10,
       background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10,
       padding: '12px 16px', marginBottom: 20,
     }}>
-      {[
-        { label: 'WCL Leads Today',     value: wclReceived,      color: C.gold   },
-        { label: 'WCL Convos Today',    value: wclConversations, color: C.gold   },
-        { label: 'SMS Convos Today',    value: smsConversations, color: C.purple },
-        { label: 'Outreach Sent Today', value: outContacts,      color: C.cyan   },
-      ].map(item => (
+      {nums.map(item => (
         <div key={item.label} style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 22, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: item.color }}>{item.value}</div>
           <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{item.label}</div>
@@ -230,7 +226,7 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
             </div>
             <div style={{ gridColumn: '1/-1' }}>
               <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Counties (comma-separated)</label>
-              <input value={form.counties} onChange={e => fv('counties', e.target.value)} placeholder="e.g. Orange, Los Angeles, San Bernardino"
+              <input value={form.counties} onChange={e => fv('counties', e.target.value)} placeholder="e.g. Orange, Los Angeles"
                 style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
             </div>
           </div>
@@ -256,11 +252,11 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
         {campaigns.map(c => {
           const cOut = outreach.filter(o => o.campaignId === c.id);
           const cSms = sms.filter(s => s.campaignId === c.id);
-          const totalContacts        = cOut.reduce((s, o) => s + safeNum(o.contacts), 0);
-          const totalPositiveReplies = cOut.reduce((s, o) => s + safeNum(o.positiveReplies), 0);
-          const totalConversations   = cSms.reduce((s, e) => s + safeNum(e.conversations), 0);
-          const totalContracts       = cSms.reduce((s, e) => s + safeNum(e.contracts), 0);
-          const totalCost            = cOut.reduce((s, o) => s + safeNum(o.cost), 0);
+          const totalContacts      = cOut.reduce((s, o) => s + safeNum(o.contacts), 0);
+          const totalPosReplies    = cSms.reduce((s, e) => s + safeNum(e.positiveReplies), 0);
+          const totalWantsToSell   = cSms.reduce((s, e) => s + safeNum(e.wantsToSell), 0);
+          const totalOffers        = cSms.reduce((s, e) => s + safeNum(e.offers), 0);
+          const totalContracts     = cSms.reduce((s, e) => s + safeNum(e.contracts), 0);
 
           return (
             <div key={c.id} style={{
@@ -293,11 +289,11 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginTop: 14 }}>
                 {[
-                  { label: 'Contacts',   value: totalContacts.toLocaleString(),        color: C.cyan   },
-                  { label: '+Replies',   value: totalPositiveReplies.toLocaleString(),  color: C.green  },
-                  { label: 'Convos',     value: totalConversations.toLocaleString(),    color: C.purple },
-                  { label: 'Contracts',  value: totalContracts.toLocaleString(),        color: C.gold   },
-                  { label: 'Cost',       value: fmtCost(totalCost),                    color: C.orange },
+                  { label: 'Contacts',      value: totalContacts.toLocaleString(),    color: C.cyan   },
+                  { label: '+Replies',      value: totalPosReplies.toLocaleString(),   color: C.green  },
+                  { label: 'Wants to Sell', value: totalWantsToSell.toLocaleString(),  color: C.purple },
+                  { label: 'Offers',        value: totalOffers.toLocaleString(),       color: C.gold   },
+                  { label: 'Contracts',     value: totalContracts.toLocaleString(),    color: C.orange },
                 ].map(st => (
                   <div key={st.label} style={{ background: C.s2, borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
                     <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: st.color }}>{st.value}</div>
@@ -340,24 +336,27 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
 }
 
 // ─── OUTREACH TAB ─────────────────────────────────────────────────────────────
-function OutreachTab({ outreach, campaigns, settings, onRefresh }) {
+const LIST_TYPES = ['Pre-Foreclosure', 'Vacant', 'Tired Landlords', 'Probate', 'Tax Delinquent', 'Other'];
+
+function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm]         = useState({ listName: '', county: '', campaignId: '', contacts: '', totalReplies: '', positiveReplies: '', date: today(), status: 'active' });
+  const [form, setForm]         = useState({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', date: today(), status: 'Active' });
   const [saving, setSaving]     = useState(false);
   const [err, setErr]           = useState('');
   const [editId, setEditId]     = useState(null);
-
-  const floor      = safeNum(settings.positiveReplyFloor) || 1.0;
-  const minForDiag = safeNum(settings.minPositiveRepliesForDiag) || 10;
 
   function fv(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
   function startEdit(o) {
     setEditId(o.id);
     setForm({
-      listName: o.listName || '', county: o.county || '', campaignId: o.campaignId || '',
-      contacts: String(o.contacts || 0), totalReplies: String(o.totalReplies || 0),
-      positiveReplies: String(o.positiveReplies || 0), date: o.date || today(), status: o.status || 'active',
+      listName: o.listName || '',
+      counties: Array.isArray(o.counties) ? o.counties.join(', ') : (o.county || ''),
+      listType: o.listType || 'Pre-Foreclosure',
+      campaignId: o.campaignId || '',
+      contacts: String(o.contacts || 0),
+      date: o.date || today(),
+      status: o.status || 'Active',
     });
     setShowForm(true);
   }
@@ -365,17 +364,20 @@ function OutreachTab({ outreach, campaigns, settings, onRefresh }) {
   async function submit(e) {
     e.preventDefault(); setSaving(true); setErr('');
     const payload = {
-      listName: form.listName.trim(), county: form.county.trim(),
+      listName: form.listName.trim(),
+      counties: form.counties.split(',').map(s => s.trim()).filter(Boolean),
+      listType: form.listType,
       campaignId: form.campaignId || null,
-      contacts: safeNum(form.contacts), totalReplies: safeNum(form.totalReplies),
-      positiveReplies: safeNum(form.positiveReplies), date: form.date.trim(), status: form.status,
+      contacts: safeNum(form.contacts),
+      date: form.date.trim(),
+      status: form.status,
     };
     try {
       const url    = editId ? `/api/kpi/outreach/${editId}` : '/api/kpi/outreach';
       const method = editId ? 'PUT' : 'POST';
       const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Failed'); }
-      setForm({ listName: '', county: '', campaignId: '', contacts: '', totalReplies: '', positiveReplies: '', date: today(), status: 'active' });
+      setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', date: today(), status: 'Active' });
       setShowForm(false); setEditId(null); onRefresh();
     } catch (e) { setErr(e.message); }
     finally { setSaving(false); }
@@ -387,25 +389,12 @@ function OutreachTab({ outreach, campaigns, settings, onRefresh }) {
     onRefresh();
   }
 
-  function diagBadge(o) {
-    const pct = safePct(safeNum(o.positiveReplies), safeNum(o.contacts));
-    const hasEnough = safeNum(o.positiveReplies) >= minForDiag;
-    if (!hasEnough) return (
-      <span style={{ fontSize: 11, color: C.t3, background: C.s2, borderRadius: 4, padding: '2px 6px' }}>needs data</span>
-    );
-    const ok = pct >= floor;
-    return (
-      <span style={{
-        fontSize: 11, fontWeight: 600,
-        background: ok ? 'rgba(0,200,100,0.15)' : 'rgba(220,50,50,0.15)',
-        color: ok ? C.green : C.red, borderRadius: 4, padding: '2px 6px',
-      }}>{pct.toFixed(1)}% {ok ? '✓' : '↓'}</span>
-    );
-  }
+  // Stat box data
+  const activeOutreach = outreach.filter(o => (o.status === 'Active' || o.status === 'active') && !o.deleted);
+  const totalContactsLoaded = activeOutreach.reduce((s, o) => s + safeNum(o.contacts), 0);
+  const totalPositiveReplies = sms.reduce((s, e) => s + safeNum(e.positiveReplies), 0);
 
-  const totalContacts = outreach.reduce((s, o) => s + safeNum(o.contacts), 0);
-  const totalCost     = outreach.reduce((s, o) => s + safeNum(o.cost), 0);
-  const totalPos      = outreach.reduce((s, o) => s + safeNum(o.positiveReplies), 0);
+  const inpStyle = { width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' };
 
   return (
     <div>
@@ -413,17 +402,17 @@ function OutreachTab({ outreach, campaigns, settings, onRefresh }) {
         <div style={{ fontSize: 16, fontWeight: 700, color: C.tx }}>Outreach Lists ({outreach.length})</div>
         <button onClick={() => {
           setShowForm(!showForm); setEditId(null); setErr('');
-          setForm({ listName: '', county: '', campaignId: '', contacts: '', totalReplies: '', positiveReplies: '', date: today(), status: 'active' });
+          setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', date: today(), status: 'Active' });
         }} style={{
           background: C.cyan, color: '#000', border: 'none', borderRadius: 8,
           padding: '10px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 46,
         }}>+ Log Outreach</button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
-        <StatCard label="Total Contacts" value={totalContacts.toLocaleString()} color={C.cyan} />
-        <StatCard label="Positive Replies" value={totalPos.toLocaleString()} color={C.green} />
-        <StatCard label="Total Cost" value={fmtCost(totalCost)} color={C.orange} />
+      {/* 2 stat boxes */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+        <StatCard label="Total Contacts Loaded" value={totalContactsLoaded.toLocaleString()} color={C.cyan} />
+        <StatCard label="Total Positive Replies" value={totalPositiveReplies.toLocaleString()} color={C.green} />
       </div>
 
       {showForm && (
@@ -433,41 +422,47 @@ function OutreachTab({ outreach, campaigns, settings, onRefresh }) {
             <div>
               <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>List Name *</label>
               <input value={form.listName} onChange={e => fv('listName', e.target.value)} required placeholder="e.g. Pre-Foreclosure Q2"
-                style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
+                style={inpStyle} />
             </div>
             <div>
-              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>County</label>
-              <input value={form.county} onChange={e => fv('county', e.target.value)} placeholder="e.g. Orange"
-                style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
+              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>List Type</label>
+              <select value={form.listType} onChange={e => fv('listType', e.target.value)} style={inpStyle}>
+                {LIST_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div style={{ gridColumn: '1/-1' }}>
+              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Counties (comma-separated)</label>
+              <input value={form.counties} onChange={e => fv('counties', e.target.value)} placeholder="e.g. Orange, Los Angeles, San Bernardino"
+                style={inpStyle} />
             </div>
             <div>
               <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Campaign</label>
-              <select value={form.campaignId} onChange={e => fv('campaignId', e.target.value)}
-                style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }}>
+              <select value={form.campaignId} onChange={e => fv('campaignId', e.target.value)} style={inpStyle}>
                 <option value="">None</option>
                 {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
-              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Date</label>
+              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Date Loaded</label>
               <input type="text" inputMode="numeric" value={form.date} onChange={e => fv('date', e.target.value)} placeholder="YYYY-MM-DD"
-                style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
+                style={inpStyle} />
             </div>
-            {[
-              { label: 'Contacts Sent', key: 'contacts' },
-              { label: 'Total Replies', key: 'totalReplies' },
-              { label: 'Positive Replies', key: 'positiveReplies' },
-            ].map(f => (
-              <div key={f.key}>
-                <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>{f.label}</label>
-                <input type="text" inputMode="numeric" value={form[f.key]} onChange={e => fv(f.key, e.target.value)} placeholder="0"
-                  style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
-              </div>
-            ))}
             <div>
-              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Auto Cost</label>
-              <div style={{ padding: '10px 12px', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, color: C.t2, fontSize: 14, fontFamily: 'JetBrains Mono,monospace' }}>
-                {fmtCost((safeNum(form.contacts) || 0) * (safeNum(settings.smsCostPerText) || 0.04))}
+              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Contacts Loaded</label>
+              <input type="text" inputMode="numeric" value={form.contacts} onChange={e => fv('contacts', e.target.value)} placeholder="0"
+                style={inpStyle} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Status</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {['Active', 'Complete'].map(s => (
+                  <button key={s} type="button" onClick={() => fv('status', s)} style={{
+                    flex: 1, padding: '10px 0', borderRadius: 8, border: `2px solid ${form.status === s ? (s === 'Active' ? C.green : C.t2) : C.bd}`,
+                    background: form.status === s ? (s === 'Active' ? 'rgba(0,200,100,0.15)' : 'rgba(150,150,150,0.15)') : 'transparent',
+                    color: form.status === s ? (s === 'Active' ? C.green : C.t2) : C.t3,
+                    fontWeight: 700, fontSize: 13, cursor: 'pointer',
+                  }}>{s}</button>
+                ))}
               </div>
             </div>
           </div>
@@ -492,6 +487,8 @@ function OutreachTab({ outreach, campaigns, settings, onRefresh }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {outreach.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(o => {
           const camp = campaigns.find(c => c.id === o.campaignId);
+          const isActive = o.status === 'Active' || o.status === 'active';
+          const counties = Array.isArray(o.counties) ? o.counties.join(', ') : (o.county || '');
           return (
             <div key={o.id} style={{
               background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.cyan}`,
@@ -500,12 +497,25 @@ function OutreachTab({ outreach, campaigns, settings, onRefresh }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: C.tx }}>{o.listName || '—'}</div>
-                  <div style={{ fontSize: 12, color: C.t3, marginTop: 2, fontFamily: 'JetBrains Mono,monospace' }}>
-                    {o.county && `${o.county} · `}{fmtDate(o.date)}{camp ? ` · ${camp.name}` : ''}
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 4 }}>
+                    {o.listType && (
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 7px', borderRadius: 4, background: C.cyan + '22', color: C.cyan }}>{o.listType}</span>
+                    )}
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4,
+                      background: isActive ? 'rgba(0,200,100,0.15)' : 'rgba(150,150,150,0.15)',
+                      color: isActive ? C.green : C.t3,
+                    }}>{o.status || 'Active'}</span>
+                    {counties && <span style={{ fontSize: 12, color: C.t3, fontFamily: 'JetBrains Mono,monospace' }}>{counties}</span>}
+                    <span style={{ fontSize: 12, color: C.t3 }}>{fmtDate(o.date)}</span>
+                    {camp && <span style={{ fontSize: 12, color: C.t3 }}>· {camp.name}</span>}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {diagBadge(o)}
+                  <div style={{ textAlign: 'center', minWidth: 54 }}>
+                    <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.cyan }}>{safeNum(o.contacts).toLocaleString()}</div>
+                    <div style={{ fontSize: 11, color: C.t3 }}>Contacts</div>
+                  </div>
                   <button onClick={() => startEdit(o)} style={{
                     background: C.s2, color: C.t2, border: `1px solid ${C.bd}`, borderRadius: 6,
                     padding: '5px 12px', fontSize: 12, cursor: 'pointer', minHeight: 32,
@@ -515,20 +525,6 @@ function OutreachTab({ outreach, campaigns, settings, onRefresh }) {
                     padding: '5px 12px', fontSize: 12, cursor: 'pointer', minHeight: 32,
                   }}>Delete</button>
                 </div>
-              </div>
-              <div style={{ display: 'flex', gap: 16, marginTop: 12, flexWrap: 'wrap' }}>
-                {[
-                  { label: 'Contacts',     value: safeNum(o.contacts).toLocaleString(),        color: C.cyan   },
-                  { label: 'Total Replies',value: safeNum(o.totalReplies).toLocaleString(),     color: C.t2     },
-                  { label: 'Positive',     value: safeNum(o.positiveReplies).toLocaleString(), color: C.green  },
-                  { label: 'Reply %',      value: fmtPct(o.positiveReplies, o.contacts),       color: C.green  },
-                  { label: 'Cost',         value: fmtCost(o.cost),                             color: C.orange },
-                ].map(st => (
-                  <div key={st.label} style={{ textAlign: 'center', minWidth: 60 }}>
-                    <div style={{ fontSize: 16, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: st.color }}>{st.value}</div>
-                    <div style={{ fontSize: 11, color: C.t3 }}>{st.label}</div>
-                  </div>
-                ))}
               </div>
             </div>
           );
@@ -571,127 +567,170 @@ function CalendarStrip({ entries, accentColor }) {
 }
 
 // ─── PIPELINE TAB ─────────────────────────────────────────────────────────────
-function PipelineTab({ wcl, sms, campaigns, settings, onRefresh }) {
-  const [subTab, setSubTab]     = useState('wcl');
+const SMS_FIELDS = ['sent', 'positiveReplies', 'wantsToSell', 'qualified', 'offers', 'contracts'];
+const SMS_LABELS = { sent: 'Sent', positiveReplies: '+Replies', wantsToSell: 'Wants to Sell', qualified: 'Qualified', offers: 'Offers', contracts: 'Contracts' };
+
+function PipelineTab({ sms, campaigns, settings, onRefresh }) {
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId]     = useState(null);
   const [form, setForm]         = useState({});
   const [saving, setSaving]     = useState(false);
   const [err, setErr]           = useState('');
 
+  const smsCostPerText = safeNum(settings.smsCostPerText) || 0.04;
+
   function fv(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
-  const wclFields = ['received', 'optouts', 'conversations', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
-  const smsFields = ['conversations', 'optouts', 'wrongNumbers', 'qualified', 'offers', 'responses', 'contracts', 'closed'];
-  const FIELD_LABELS = { optouts: 'Opt-Outs', wrongNumbers: 'Wrong Numbers' };
-  function fieldLabel(f) { return FIELD_LABELS[f] || f; }
-
-  function blankForm(type) {
-    const fields = type === 'wcl' ? wclFields : smsFields;
+  function blankForm() {
     const base = { date: today(), campaignId: '' };
-    fields.forEach(f => { base[f] = '0'; });
+    SMS_FIELDS.forEach(f => { base[f] = '0'; });
     return base;
   }
 
-  function startEdit(entry, type) {
-    setSubTab(type); setEditId(entry.id);
-    const fields = type === 'wcl' ? wclFields : smsFields;
+  function startEdit(entry) {
+    setEditId(entry.id);
     const f = { date: entry.date || today(), campaignId: entry.campaignId || '' };
-    fields.forEach(fk => { f[fk] = String(entry[fk] || 0); });
+    SMS_FIELDS.forEach(fk => { f[fk] = String(entry[fk] || 0); });
     setForm(f); setShowForm(true);
   }
 
   async function submit(e) {
     e.preventDefault(); setSaving(true); setErr('');
-    const fields  = subTab === 'wcl' ? wclFields : smsFields;
     const payload = { date: (form.date || '').trim(), campaignId: form.campaignId || null };
-    fields.forEach(fk => { payload[fk] = safeNum(form[fk]); });
+    SMS_FIELDS.forEach(fk => { payload[fk] = safeNum(form[fk]); });
     try {
-      const base   = subTab === 'wcl' ? '/api/kpi/wcl' : '/api/kpi/sms';
-      const url    = editId ? `${base}/${editId}` : base;
+      const url    = editId ? `/api/kpi/sms/${editId}` : '/api/kpi/sms';
       const method = editId ? 'PUT' : 'POST';
       const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Failed'); }
-      setForm(blankForm(subTab)); setShowForm(false); setEditId(null); onRefresh();
+      const data = await r.json();
+      if (!r.ok) {
+        // Duplicate date — auto-switch to edit mode
+        if (r.status === 409 && data.existingId) {
+          const existing = sms.find(s => s.id === data.existingId);
+          if (existing) { startEdit(existing); setErr('Entry for this date already exists — editing instead.'); }
+          setSaving(false); return;
+        }
+        throw new Error(data.error || 'Failed');
+      }
+      setForm(blankForm()); setShowForm(false); setEditId(null); onRefresh();
     } catch (e) { setErr(e.message); }
     finally { setSaving(false); }
   }
 
-  async function doDelete(id, type) {
-    if (!confirm('Delete this entry?')) return;
-    await fetch(`/api/kpi/${type}/${id}`, { method: 'DELETE' });
+  async function doDelete(id) {
+    if (!confirm('Delete this SMS entry? The SMS cost will be reversed.')) return;
+    await fetch(`/api/kpi/sms/${id}`, { method: 'DELETE' });
     onRefresh();
   }
 
-  const activeEntries = subTab === 'wcl' ? wcl : sms;
-  const accentColor   = subTab === 'wcl' ? C.gold : C.purple;
-  const fields        = subTab === 'wcl' ? wclFields : smsFields;
-
+  // Totals
   const totals = useMemo(() => {
     const t = {};
-    fields.forEach(f => { t[f] = activeEntries.reduce((s, e) => s + safeNum(e[f]), 0); });
+    SMS_FIELDS.forEach(f => { t[f] = sms.reduce((s, e) => s + safeNum(e[f]), 0); });
     return t;
-  }, [activeEntries, fields]);
+  }, [sms]);
+
+  // Weekly data for chart
+  const weeks = useMemo(() => {
+    const map = {};
+    sms.forEach(e => {
+      if (!e.date) return;
+      const ws = getWeekStart(e.date);
+      if (!map[ws]) map[ws] = { offers: 0, contracts: 0 };
+      map[ws].offers    += safeNum(e.offers);
+      map[ws].contracts += safeNum(e.contracts);
+    });
+    return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0])).slice(-8);
+  }, [sms]);
+
+  const maxVal = Math.max(1, ...weeks.map(([, v]) => Math.max(v.offers, v.contracts)));
+
+  const costPreview = safeNum(form.sent || 0) * smsCostPerText;
+
+  const inpStyle = { width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' };
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
-        {[{ id: 'wcl', label: 'WCL Pipeline' }, { id: 'sms', label: 'SMS Pipeline' }].map(t => (
-          <button key={t.id} onClick={() => { setSubTab(t.id); setShowForm(false); setEditId(null); setForm(blankForm(t.id)); }} style={{
-            background: subTab === t.id ? (t.id === 'wcl' ? C.gold : C.purple) + '22' : 'none',
-            color: subTab === t.id ? (t.id === 'wcl' ? C.gold : C.purple) : C.t2,
-            border: `1px solid ${subTab === t.id ? (t.id === 'wcl' ? C.gold : C.purple) : C.bd}`,
-            borderRadius: 8, padding: '8px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 40,
-          }}>{t.label}</button>
-        ))}
-        <button onClick={() => { setShowForm(!showForm); setEditId(null); setForm(blankForm(subTab)); setErr(''); }} style={{
-          background: accentColor, color: '#000', border: 'none', borderRadius: 8,
-          padding: '8px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 40, marginLeft: 'auto',
-        }}>+ Log Entry</button>
+      {/* Section 1: Metrics Table */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.t3, marginBottom: 12 }}>All-Time SMS Totals</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
+          {SMS_FIELDS.map(f => (
+            <div key={f} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '12px 8px', textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{(totals[f] || 0).toLocaleString()}</div>
+              <div style={{ fontSize: 10, color: C.t3, marginTop: 4, textTransform: 'capitalize' }}>{SMS_LABELS[f]}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      <CalendarStrip entries={activeEntries} accentColor={accentColor} />
-
-      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${fields.length},1fr)`, gap: 8, marginBottom: 20 }}>
-        {fields.map(f => (
-          <div key={f} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '10px 8px', textAlign: 'center' }}>
-            <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: accentColor }}>{(totals[f] || 0).toLocaleString()}</div>
-            <div style={{ fontSize: 10, color: C.t3, textTransform: 'capitalize', marginTop: 2 }}>{fieldLabel(f)}</div>
+      {/* Section 2: Weekly Chart */}
+      {weeks.length > 0 && (
+        <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.tx }}>Weekly Trend (last 8 weeks)</div>
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: C.t3 }}>
+              <span><span style={{ display: 'inline-block', width: 10, height: 10, background: C.gold, borderRadius: 2, marginRight: 4 }} />Offers</span>
+              <span><span style={{ display: 'inline-block', width: 10, height: 10, background: C.green, borderRadius: 2, marginRight: 4 }} />Contracts</span>
+            </div>
           </div>
-        ))}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 80 }}>
+            {weeks.map(([ws, v]) => (
+              <div key={ws} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 60 }}>
+                  <div style={{ width: 12, background: C.gold, borderRadius: '3px 3px 0 0', height: `${Math.max(2, safeDiv(v.offers, maxVal) * 60)}px` }} title={`Offers: ${v.offers}`} />
+                  <div style={{ width: 12, background: C.green, borderRadius: '3px 3px 0 0', height: `${Math.max(2, safeDiv(v.contracts, maxVal) * 60)}px` }} title={`Contracts: ${v.contracts}`} />
+                </div>
+                <div style={{ fontSize: 9, color: C.t3, textAlign: 'center', whiteSpace: 'nowrap' }}>{ws.slice(5)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Section 3: Daily Log */}
+      <CalendarStrip entries={sms} accentColor={C.purple} />
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>Daily Log ({sms.length} entries)</div>
+        <button onClick={() => { setShowForm(!showForm); setEditId(null); setForm(blankForm()); setErr(''); }} style={{
+          background: C.purple, color: '#fff', border: 'none', borderRadius: 8,
+          padding: '8px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 40,
+        }}>+ Log Entry</button>
       </div>
 
       {showForm && (
         <form onSubmit={submit} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 20, marginBottom: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 14 }}>{editId ? 'Edit Entry' : `Log ${subTab.toUpperCase()} Entry`}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: C.tx, marginBottom: 14 }}>{editId ? 'Edit SMS Entry' : 'Log SMS Entry'}</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
             <div>
               <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Date</label>
-              <input type="text" inputMode="numeric" value={form.date || ''} onChange={e => fv('date', e.target.value)} placeholder="YYYY-MM-DD"
-                style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
+              <input type="text" inputMode="numeric" value={form.date || ''} onChange={e => fv('date', e.target.value)} placeholder="YYYY-MM-DD" style={inpStyle} />
             </div>
-            {subTab === 'sms' && (
-              <div>
-                <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Campaign</label>
-                <select value={form.campaignId || ''} onChange={e => fv('campaignId', e.target.value)}
-                  style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }}>
-                  <option value="">None</option>
-                  {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-            )}
-            {fields.map(f => (
+            <div>
+              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Campaign</label>
+              <select value={form.campaignId || ''} onChange={e => fv('campaignId', e.target.value)} style={inpStyle}>
+                <option value="">None</option>
+                {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            {SMS_FIELDS.map(f => (
               <div key={f}>
-                <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4, textTransform: 'capitalize' }}>{fieldLabel(f)}</label>
-                <input type="text" inputMode="numeric" pattern="[0-9]*" value={form[f] || '0'} onChange={e => fv(f, e.target.value)}
-                  style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
+                <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>{SMS_LABELS[f]}</label>
+                <input type="text" inputMode="numeric" pattern="[0-9]*" value={form[f] || '0'} onChange={e => fv(f, e.target.value)} style={inpStyle} />
               </div>
             ))}
+          </div>
+          {/* SMS cost preview */}
+          <div style={{ padding: '10px 14px', borderRadius: 8, background: C.purple + '15', border: `1px solid ${C.purple}40`, marginBottom: 12 }}>
+            <span style={{ fontSize: 13, color: C.t2 }}>SMS Cost Preview: </span>
+            <span style={{ fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{fmtCost(costPreview)}</span>
+            <span style={{ fontSize: 12, color: C.t3, marginLeft: 8 }}>({safeNum(form.sent || 0).toLocaleString()} texts × ${smsCostPerText}/text) — auto-deducted from Marketing</span>
           </div>
           {err && <div style={{ color: C.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
           <div style={{ display: 'flex', gap: 10 }}>
             <button type="submit" disabled={saving} style={{
-              background: accentColor, color: '#000', border: 'none', borderRadius: 8,
+              background: C.purple, color: '#fff', border: 'none', borderRadius: 8,
               padding: '10px 24px', fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 46,
             }}>{saving ? 'Saving…' : (editId ? 'Update' : 'Save')}</button>
             <button type="button" onClick={() => { setShowForm(false); setEditId(null); setErr(''); }} style={{
@@ -702,39 +741,40 @@ function PipelineTab({ wcl, sms, campaigns, settings, onRefresh }) {
         </form>
       )}
 
-      {activeEntries.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '48px 0', color: C.t3 }}>No {subTab.toUpperCase()} entries yet.</div>
+      {sms.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: C.t3 }}>No SMS pipeline entries yet.</div>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {activeEntries.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(e => {
+        {sms.slice().sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(e => {
           const camp = campaigns.find(c => c.id === e.campaignId);
           return (
             <div key={e.id} style={{
-              background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${accentColor}`,
+              background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.purple}`,
               borderRadius: 10, padding: 16,
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                 <div>
-                  <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 14, color: accentColor, fontWeight: 600 }}>{fmtDate(e.date)}</span>
+                  <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 14, color: C.purple, fontWeight: 600 }}>{fmtDate(e.date)}</span>
                   {camp && <span style={{ fontSize: 12, color: C.t3, marginLeft: 8 }}>· {camp.name}</span>}
+                  {e.smsCost > 0 && <span style={{ fontSize: 11, color: C.t3, marginLeft: 8 }}>· {fmtCost(e.smsCost)}</span>}
                 </div>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => startEdit(e, subTab)} style={{
+                  <button onClick={() => startEdit(e)} style={{
                     background: C.s2, color: C.t2, border: `1px solid ${C.bd}`, borderRadius: 6,
                     padding: '5px 12px', fontSize: 12, cursor: 'pointer', minHeight: 32,
                   }}>Edit</button>
-                  <button onClick={() => doDelete(e.id, subTab)} style={{
+                  <button onClick={() => doDelete(e.id)} style={{
                     background: 'none', color: C.red, border: `1px solid ${C.red}`, borderRadius: 6,
                     padding: '5px 12px', fontSize: 12, cursor: 'pointer', minHeight: 32,
                   }}>Delete</button>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                {fields.map(f => (
+                {SMS_FIELDS.map(f => (
                   <div key={f} style={{ textAlign: 'center', minWidth: 54 }}>
-                    <div style={{ fontSize: 16, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: safeNum(e[f]) > 0 ? accentColor : C.t3 }}>{safeNum(e[f])}</div>
-                    <div style={{ fontSize: 10, color: C.t3, textTransform: 'capitalize' }}>{fieldLabel(f)}</div>
+                    <div style={{ fontSize: 16, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: safeNum(e[f]) > 0 ? C.purple : C.t3 }}>{safeNum(e[f])}</div>
+                    <div style={{ fontSize: 10, color: C.t3 }}>{SMS_LABELS[f]}</div>
                   </div>
                 ))}
               </div>
@@ -747,85 +787,62 @@ function PipelineTab({ wcl, sms, campaigns, settings, onRefresh }) {
 }
 
 // ─── COMBINED TAB ─────────────────────────────────────────────────────────────
-function CombinedTab({ wcl, sms, outreach, settings }) {
-  const wclContracts   = wcl.reduce((s, e) => s + safeNum(e.contracts), 0);
-  const smsContracts   = sms.reduce((s, e) => s + safeNum(e.contracts), 0);
-  const totalContracts = wclContracts + smsContracts;
-  const wclClosed      = wcl.reduce((s, e) => s + safeNum(e.closed), 0);
-  const smsClosed      = sms.reduce((s, e) => s + safeNum(e.closed), 0);
-  const wclOffers      = wcl.reduce((s, e) => s + safeNum(e.offers), 0);
-  const smsOffers      = sms.reduce((s, e) => s + safeNum(e.offers), 0);
-  const totalOffers    = wclOffers + smsOffers;
-  const totalClosed    = wclClosed + smsClosed;
-  const totalCost      = outreach.reduce((s, o) => s + safeNum(o.cost), 0) +
-                         wcl.length * safeNum(settings.wclCost);
+function CombinedTab({ sms, outreach, settings }) {
+  const totalSent          = sms.reduce((s, e) => s + safeNum(e.sent), 0);
+  const totalPosReplies    = sms.reduce((s, e) => s + safeNum(e.positiveReplies), 0);
+  const totalWantsToSell   = sms.reduce((s, e) => s + safeNum(e.wantsToSell), 0);
+  const totalQualified     = sms.reduce((s, e) => s + safeNum(e.qualified), 0);
+  const totalOffers        = sms.reduce((s, e) => s + safeNum(e.offers), 0);
+  const totalContracts     = sms.reduce((s, e) => s + safeNum(e.contracts), 0);
+
+  const totalContacts  = outreach.filter(o => !o.deleted).reduce((s, o) => s + safeNum(o.contacts), 0);
+  const activeLists    = outreach.filter(o => !o.deleted && (o.status === 'Active' || o.status === 'active')).length;
 
   const pace = paceInfo(totalContracts);
 
-  const weeks = useMemo(() => {
-    const map = {};
-    [...wcl, ...sms].forEach(e => {
-      if (!e.date) return;
-      const ws = getWeekStart(e.date);
-      if (!map[ws]) map[ws] = { contracts: 0, offers: 0, closed: 0 };
-      map[ws].contracts += safeNum(e.contracts);
-      map[ws].offers    += safeNum(e.offers);
-      map[ws].closed    += safeNum(e.closed);
-    });
-    return Object.entries(map).sort((a, b) => a[0].localeCompare(b[0])).slice(-8);
-  }, [wcl, sms]);
-
-  const maxContracts = Math.max(1, ...weeks.map(([, v]) => v.contracts));
-
   return (
     <div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+      {/* All-time SMS totals */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 24 }}>
         <StatCard label="Total Contracts" value={totalContracts} color={C.gold} />
-        <StatCard label="Total Closed"    value={totalClosed}    color={C.green} />
         <StatCard label="Total Offers"    value={totalOffers}    color={C.cyan} />
-        <StatCard label="Total Cost"      value={fmtCost(totalCost)} color={C.orange} />
+        <StatCard label="Total Sent"      value={totalSent.toLocaleString()} color={C.purple} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
-        {/* WCL */}
-        <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.gold}`, borderRadius: 10, padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.gold, marginBottom: 12 }}>WCL Pipeline</div>
-          {[
-            { label: 'Received',      value: wcl.reduce((s, e) => s + safeNum(e.received), 0) },
-            { label: 'Conversations', value: wcl.reduce((s, e) => s + safeNum(e.conversations), 0) },
-            { label: 'Qualified',     value: wcl.reduce((s, e) => s + safeNum(e.qualified), 0) },
-            { label: 'Offers',        value: wclOffers },
-            { label: 'Responses',     value: wcl.reduce((s, e) => s + safeNum(e.responses), 0) },
-            { label: 'Contracts',     value: wclContracts },
-            { label: 'Closed',        value: wclClosed },
-          ].map(row => (
-            <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px solid ${C.bd}` }}>
-              <span style={{ fontSize: 13, color: C.t2 }}>{row.label}</span>
-              <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, fontWeight: 600, color: C.tx }}>{row.value.toLocaleString()}</span>
-            </div>
-          ))}
-          <div style={{ marginTop: 10, fontSize: 12, color: C.t3 }}>
-            Offer Rate: <span style={{ color: C.gold, fontWeight: 600 }}>{fmtPct(wclOffers, wcl.reduce((s, e) => s + safeNum(e.received), 0))}</span>
+      {/* SMS pipeline summary */}
+      <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.purple}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.purple, marginBottom: 12 }}>SMS Pipeline — All Time</div>
+        {[
+          { label: 'Texts Sent',       value: totalSent },
+          { label: 'Positive Replies', value: totalPosReplies },
+          { label: 'Wants to Sell',    value: totalWantsToSell },
+          { label: 'Qualified',        value: totalQualified },
+          { label: 'Offers',           value: totalOffers },
+          { label: 'Contracts',        value: totalContracts },
+        ].map(row => (
+          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px solid ${C.bd}` }}>
+            <span style={{ fontSize: 13, color: C.t2 }}>{row.label}</span>
+            <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, fontWeight: 600, color: C.tx }}>{row.value.toLocaleString()}</span>
           </div>
+        ))}
+        <div style={{ marginTop: 10, fontSize: 12, color: C.t3 }}>
+          Reply Rate: <span style={{ color: C.purple, fontWeight: 600 }}>{fmtPct(totalPosReplies, totalSent)}</span>
+          &nbsp;·&nbsp;
+          Offer Rate: <span style={{ color: C.gold, fontWeight: 600 }}>{fmtPct(totalOffers, totalPosReplies)}</span>
         </div>
-        {/* SMS */}
-        <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.purple}`, borderRadius: 10, padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.purple, marginBottom: 12 }}>SMS Pipeline</div>
-          {[
-            { label: 'Conversations', value: sms.reduce((s, e) => s + safeNum(e.conversations), 0) },
-            { label: 'Qualified',     value: sms.reduce((s, e) => s + safeNum(e.qualified), 0) },
-            { label: 'Offers',        value: smsOffers },
-            { label: 'Responses',     value: sms.reduce((s, e) => s + safeNum(e.responses), 0) },
-            { label: 'Contracts',     value: smsContracts },
-            { label: 'Closed',        value: smsClosed },
-          ].map(row => (
-            <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px solid ${C.bd}` }}>
-              <span style={{ fontSize: 13, color: C.t2 }}>{row.label}</span>
-              <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, fontWeight: 600, color: C.tx }}>{row.value.toLocaleString()}</span>
-            </div>
-          ))}
-          <div style={{ marginTop: 10, fontSize: 12, color: C.t3 }}>
-            Offer Rate: <span style={{ color: C.purple, fontWeight: 600 }}>{fmtPct(smsOffers, sms.reduce((s, e) => s + safeNum(e.conversations), 0))}</span>
+      </div>
+
+      {/* Outreach summary */}
+      <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.cyan}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.cyan, marginBottom: 12 }}>Outreach Summary</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 28, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.cyan }}>{totalContacts.toLocaleString()}</div>
+            <div style={{ fontSize: 12, color: C.t3 }}>Total Contacts</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 28, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.green }}>{activeLists}</div>
+            <div style={{ fontSize: 12, color: C.t3 }}>Active Lists</div>
           </div>
         </div>
       </div>
@@ -861,25 +878,6 @@ function CombinedTab({ wcl, sms, outreach, settings }) {
         </div>
         <div style={{ fontSize: 11, color: C.t3, marginTop: 10 }}>{PACE_START} → {PACE_END} · Goal: {PACE_GOAL} contracts</div>
       </div>
-
-      {/* Weekly bar chart */}
-      {weeks.length > 0 && (
-        <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 10, padding: 18 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.tx, marginBottom: 16 }}>Weekly Contracts (last 8 weeks)</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 80 }}>
-            {weeks.map(([ws, v]) => (
-              <div key={ws} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                <div style={{ fontSize: 11, color: C.gold, fontWeight: 600 }}>{v.contracts || ''}</div>
-                <div style={{
-                  width: '100%', borderRadius: '4px 4px 0 0', background: C.gold,
-                  height: `${Math.max(2, safeDiv(v.contracts, maxContracts) * 60)}px`, opacity: 0.85,
-                }} />
-                <div style={{ fontSize: 9, color: C.t3, textAlign: 'center', whiteSpace: 'nowrap' }}>{ws.slice(5)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -890,18 +888,16 @@ export default function KPIPage() {
   const [tab, setTab]                 = useState('campaigns');
   const [campaigns, setCampaigns]     = useState([]);
   const [outreach, setOutreach]       = useState([]);
-  const [wcl, setWcl]                 = useState([]);
   const [sms, setSms]                 = useState([]);
-  const [settings, setSettings]       = useState({ wclCost: 4.99, smsCostPerText: 0.04, positiveReplyFloor: 1.0, offerRateFloor: 90, minPositiveRepliesForDiag: 10 });
+  const [settings, setSettings]       = useState({ smsCostPerText: 0.04, positiveReplyFloor: 1.0, offerRateFloor: 90, minPositiveRepliesForDiag: 10 });
   const [loading, setLoading]         = useState(true);
 
   const load = useCallback(async () => {
     try {
-      const [wipeRes, campRes, outRes, wclRes, smsRes, setRes] = await Promise.all([
+      const [wipeRes, campRes, outRes, smsRes, setRes] = await Promise.all([
         fetch('/api/kpi/wipe'),
         fetch('/api/kpi/campaigns'),
         fetch('/api/kpi/outreach'),
-        fetch('/api/kpi/wcl'),
         fetch('/api/kpi/sms'),
         fetch('/api/kpi/settings'),
       ]);
@@ -909,7 +905,6 @@ export default function KPIPage() {
       setInitialized(wipeData.initialized_v3 === true);
       if (campRes.ok) setCampaigns(await campRes.json());
       if (outRes.ok)  setOutreach(await outRes.json());
-      if (wclRes.ok)  setWcl(await wclRes.json());
       if (smsRes.ok)  setSms(await smsRes.json());
       if (setRes.ok)  setSettings(await setRes.json());
     } catch (e) { /* silent */ }
@@ -956,13 +951,13 @@ export default function KPIPage() {
         }}>📅 Calendar</a>
       </div>
 
-      <TodayStrip wcl={wcl} sms={sms} outreach={outreach} />
+      <TodayStrip sms={sms} />
       <TabBar tabs={TABS} active={tab} onChange={setTab} />
 
       {tab === 'campaigns' && <CampaignsTab campaigns={campaigns} outreach={outreach} sms={sms} onRefresh={load} />}
-      {tab === 'outreach'  && <OutreachTab  outreach={outreach} campaigns={campaigns} settings={settings} onRefresh={load} />}
-      {tab === 'pipeline'  && <PipelineTab  wcl={wcl} sms={sms} campaigns={campaigns} settings={settings} onRefresh={load} />}
-      {tab === 'combined'  && <CombinedTab  wcl={wcl} sms={sms} outreach={outreach} settings={settings} />}
+      {tab === 'outreach'  && <OutreachTab  outreach={outreach} sms={sms} campaigns={campaigns} onRefresh={load} />}
+      {tab === 'pipeline'  && <PipelineTab  sms={sms} campaigns={campaigns} settings={settings} onRefresh={load} />}
+      {tab === 'combined'  && <CombinedTab  sms={sms} outreach={outreach} settings={settings} />}
     </div>
   );
 }

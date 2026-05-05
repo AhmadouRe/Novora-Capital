@@ -6,10 +6,16 @@ import { writeAudit } from '../../../lib/audit.js';
 export const dynamic = 'force-dynamic';
 
 const KEY = 'nc:kpi:outreach';
-const SETTINGS_KEY = 'nc:kpi:settings';
+const LIST_TYPES = ['Pre-Foreclosure', 'Vacant', 'Tired Landlords', 'Probate', 'Tax Delinquent', 'Other'];
 
 function clean(v) {
   return typeof v === 'string' ? v.trim() : '';
+}
+
+function parseCounties(raw) {
+  if (Array.isArray(raw)) return raw.map(c => String(c).trim()).filter(Boolean);
+  if (typeof raw === 'string') return raw.split(',').map(s => s.trim()).filter(Boolean);
+  return [];
 }
 
 export async function GET(request) {
@@ -24,21 +30,14 @@ export async function POST(request) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const body = await request.json();
 
-  const settings = (await kv.get(SETTINGS_KEY)) || {};
-  const smsCostPerText = typeof settings.smsCostPerText === 'number' ? settings.smsCostPerText : 0.04;
-  const contacts = Number(body.contacts) || 0;
-  const cost = Math.round(contacts * smsCostPerText * 100) / 100;
-
   const entry = {
     id: Date.now().toString(),
     listName: clean(body.listName),
-    county: clean(body.county),
+    counties: parseCounties(body.counties),
+    listType: LIST_TYPES.includes(body.listType) ? body.listType : 'Other',
     campaignId: body.campaignId || null,
-    contacts,
-    totalReplies: Number(body.totalReplies) || 0,
-    positiveReplies: Number(body.positiveReplies) || 0,
-    cost,
-    status: body.status || 'active',
+    contacts: Number(body.contacts) || 0,
+    status: body.status === 'Complete' ? 'Complete' : 'Active',
     date: clean(body.date),
     createdBy: session.userName,
     createdAt: new Date().toISOString(),
@@ -48,6 +47,6 @@ export async function POST(request) {
   const list = (await kv.get(KEY)) || [];
   list.push(entry);
   await kv.set(KEY, list);
-  await writeAudit(session.userId, session.userName, 'novora-capital', 'OUTREACH_CREATED', `List: ${entry.listName}, County: ${entry.county}`);
+  await writeAudit(session.userId, session.userName, 'novora-capital', 'OUTREACH_CREATED', `List: ${entry.listName}, Type: ${entry.listType}`);
   return NextResponse.json(entry);
 }

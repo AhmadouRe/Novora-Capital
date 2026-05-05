@@ -18,10 +18,9 @@ export async function GET(request) {
 export async function PUT(request) {
   const session = await getSessionFromReq(request);
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!session.access?.manageTeam) return NextResponse.json({ error: 'Access denied' }, { status: 403 });
 
   const { account, balance } = await request.json();
-  const validAccounts = ['marketing', 'operating', 'reserve'];
+  const validAccounts = ['marketing', 'operating', 'reserve', 'taxes', 'owner'];
   if (!validAccounts.includes(account)) return NextResponse.json({ error: 'Invalid account' }, { status: 400 });
 
   const current = await getItem('nc:expenses:manual_balances') || {};

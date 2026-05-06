@@ -23,6 +23,7 @@ export async function PUT(request, { params }) {
   if (body.counties !== undefined) updates.counties = Array.isArray(body.counties) ? body.counties.map(s => clean(s)).filter(Boolean) : [];
   if (body.status !== undefined) updates.status = body.status === 'closed' ? 'closed' : 'active';
   if (body.startDate !== undefined) updates.startDate = clean(body.startDate);
+  if (body.contacts !== undefined) updates.contacts = Math.max(0, parseInt(String(body.contacts||'').replace(/[^0-9]/g,''))||0);
 
   campaigns[idx] = { ...campaigns[idx], ...updates, updatedAt: new Date().toISOString() };
   await kv.set('nc:kpi:campaigns', campaigns);

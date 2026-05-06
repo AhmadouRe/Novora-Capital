@@ -155,7 +155,7 @@ function TodayStrip({ sms }) {
 // ─── CAMPAIGNS TAB ────────────────────────────────────────────────────────────
 function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
   const [showForm, setShowForm]       = useState(false);
-  const [form, setForm]               = useState({ name: '', counties: '', startDate: today(), status: 'active' });
+  const [form, setForm]               = useState({ name: '', counties: '', startDate: today(), status: 'active', contacts: '' });
   const [saving, setSaving]           = useState(false);
   const [err, setErr]                 = useState('');
   const [deleteModal, setDeleteModal] = useState(null);
@@ -170,10 +170,10 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
     try {
       const r = await fetch('/api/kpi/campaigns', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.name.trim(), counties, startDate: form.startDate, status: form.status }),
+        body: JSON.stringify({ name: form.name.trim(), counties, startDate: form.startDate, status: form.status, contacts: parseInt(form.contacts) || 0 }),
       });
       if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Failed'); }
-      setForm({ name: '', counties: '', startDate: today(), status: 'active' });
+      setForm({ name: '', counties: '', startDate: today(), status: 'active', contacts: '' });
       setShowForm(false); onRefresh();
     } catch (e) { setErr(e.message); }
     finally { setSaving(false); }
@@ -229,6 +229,12 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
               <input value={form.counties} onChange={e => fv('counties', e.target.value)} placeholder="e.g. Orange, Los Angeles"
                 style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
             </div>
+            <div style={{ gridColumn: '1/-1' }}>
+              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Contacts Loaded</label>
+              <div style={{ fontSize: 11, color: C.t3, marginBottom: 4 }}>Total contacts loaded for this campaign</div>
+              <input type="text" inputMode="numeric" value={form.contacts} onChange={e => fv('contacts', e.target.value.replace(/[^0-9]/g, ''))} placeholder=""
+                style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }} />
+            </div>
           </div>
           {err && <div style={{ color: C.red, fontSize: 13, marginBottom: 10 }}>{err}</div>}
           <div style={{ display: 'flex', gap: 10 }}>
@@ -250,9 +256,8 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {campaigns.map(c => {
-          const cOut = outreach.filter(o => o.campaignId === c.id);
           const cSms = sms.filter(s => s.campaignId === c.id);
-          const totalContacts      = cOut.reduce((s, o) => s + safeNum(o.contacts), 0);
+          const totalContacts      = c.contacts || 0;
           const totalPosReplies    = cSms.reduce((s, e) => s + safeNum(e.positiveReplies), 0);
           const totalWantsToSell   = cSms.reduce((s, e) => s + safeNum(e.wantsToSell), 0);
           const totalOffers        = cSms.reduce((s, e) => s + safeNum(e.offers), 0);
@@ -340,7 +345,7 @@ const LIST_TYPES = ['Pre-Foreclosure', 'Vacant', 'Tired Landlords', 'Probate', '
 
 function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm]         = useState({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', textsSent: '', date: today(), status: 'Active' });
+  const [form, setForm]         = useState({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', textsSent: '', date: today(), status: 'Active' });
   const [saving, setSaving]     = useState(false);
   const [err, setErr]           = useState('');
   const [editId, setEditId]     = useState(null);
@@ -354,7 +359,6 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
       counties: Array.isArray(o.counties) ? o.counties.join(', ') : (o.county || ''),
       listType: o.listType || 'Pre-Foreclosure',
       campaignId: o.campaignId || '',
-      contacts: String(o.contacts || 0),
       textsSent: String(o.textsSent || 0),
       date: o.date || today(),
       status: o.status || 'Active',
@@ -369,7 +373,6 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
       counties: form.counties.split(',').map(s => s.trim()).filter(Boolean),
       listType: form.listType,
       campaignId: form.campaignId || null,
-      contacts: safeNum(form.contacts),
       textsSent: safeNum(form.textsSent),
       date: form.date.trim(),
       status: form.status,
@@ -379,7 +382,7 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
       const method = editId ? 'PUT' : 'POST';
       const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Failed'); }
-      setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', textsSent: '', date: today(), status: 'Active' });
+      setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', textsSent: '', date: today(), status: 'Active' });
       setShowForm(false); setEditId(null); onRefresh();
     } catch (e) { setErr(e.message); }
     finally { setSaving(false); }
@@ -392,8 +395,9 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
   }
 
   // Stat box data
-  const activeOutreach = outreach.filter(o => (o.status === 'Active' || o.status === 'active') && !o.deleted);
-  const totalContactsLoaded = activeOutreach.reduce((s, o) => s + safeNum(o.contacts), 0);
+  const totalContactsLoaded = campaigns
+    .filter(c => c.status === 'active')
+    .reduce((s, c) => s + (c.contacts || 0), 0);
   const totalPositiveReplies = sms.reduce((s, e) => s + safeNum(e.positiveReplies), 0);
 
   const inpStyle = { width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' };
@@ -404,7 +408,7 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
         <div style={{ fontSize: 16, fontWeight: 700, color: C.tx }}>Outreach Lists ({outreach.length})</div>
         <button onClick={() => {
           setShowForm(!showForm); setEditId(null); setErr('');
-          setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', contacts: '', textsSent: '', date: today(), status: 'Active' });
+          setForm({ listName: '', counties: '', listType: 'Pre-Foreclosure', campaignId: '', textsSent: '', date: today(), status: 'Active' });
         }} style={{
           background: C.cyan, color: '#000', border: 'none', borderRadius: 8,
           padding: '10px 20px', fontSize: 14, fontWeight: 600, cursor: 'pointer', minHeight: 46,
@@ -447,11 +451,6 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
             <div>
               <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Date Loaded</label>
               <input type="text" inputMode="numeric" value={form.date} onChange={e => fv('date', e.target.value)} placeholder="YYYY-MM-DD"
-                style={inpStyle} />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Contacts Loaded</label>
-              <input type="text" inputMode="numeric" value={form.contacts} onChange={e => fv('contacts', e.target.value)} placeholder="0"
                 style={inpStyle} />
             </div>
             <div>
@@ -521,15 +520,9 @@ function OutreachTab({ outreach, sms, campaigns, onRefresh }) {
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <div style={{ textAlign: 'center', minWidth: 54 }}>
-                    <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.cyan }}>{safeNum(o.contacts).toLocaleString()}</div>
-                    <div style={{ fontSize: 11, color: C.t3 }}>Contacts</div>
+                    <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{safeNum(o.textsSent).toLocaleString()}</div>
+                    <div style={{ fontSize: 11, color: C.t3 }}>Texts Sent</div>
                   </div>
-                  {safeNum(o.textsSent) > 0 && (
-                    <div style={{ textAlign: 'center', minWidth: 54 }}>
-                      <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{safeNum(o.textsSent).toLocaleString()}</div>
-                      <div style={{ fontSize: 11, color: C.t3 }}>Texts Sent</div>
-                    </div>
-                  )}
                   <button onClick={() => startEdit(o)} style={{
                     background: C.s2, color: C.t2, border: `1px solid ${C.bd}`, borderRadius: 6,
                     padding: '5px 12px', fontSize: 12, cursor: 'pointer', minHeight: 32,
@@ -822,7 +815,7 @@ function PipelineTab({ sms, outreach, campaigns, settings, onRefresh }) {
 }
 
 // ─── COMBINED TAB ─────────────────────────────────────────────────────────────
-function CombinedTab({ sms, outreach, settings }) {
+function CombinedTab({ sms, outreach, campaigns, settings }) {
   const totalSent          = outreach.filter(o => !o.deleted).reduce((s, o) => s + safeNum(o.textsSent || 0), 0);
   const totalPosReplies    = sms.reduce((s, e) => s + safeNum(e.positiveReplies), 0);
   const totalWantsToSell   = sms.reduce((s, e) => s + safeNum(e.wantsToSell), 0);
@@ -830,7 +823,7 @@ function CombinedTab({ sms, outreach, settings }) {
   const totalOffers        = sms.reduce((s, e) => s + safeNum(e.offers), 0);
   const totalContracts     = sms.reduce((s, e) => s + safeNum(e.contracts), 0);
 
-  const totalContacts  = outreach.filter(o => !o.deleted).reduce((s, o) => s + safeNum(o.contacts), 0);
+  const totalContacts  = campaigns.reduce((s, c) => s + (c.contacts || 0), 0);
   const activeLists    = outreach.filter(o => !o.deleted && (o.status === 'Active' || o.status === 'active')).length;
 
   const pace = paceInfo(totalContracts);
@@ -992,7 +985,7 @@ export default function KPIPage() {
       {tab === 'campaigns' && <CampaignsTab campaigns={campaigns} outreach={outreach} sms={sms} onRefresh={load} />}
       {tab === 'outreach'  && <OutreachTab  outreach={outreach} sms={sms} campaigns={campaigns} onRefresh={load} />}
       {tab === 'pipeline'  && <PipelineTab  sms={sms} outreach={outreach} campaigns={campaigns} settings={settings} onRefresh={load} />}
-      {tab === 'combined'  && <CombinedTab  sms={sms} outreach={outreach} settings={settings} />}
+      {tab === 'combined'  && <CombinedTab  sms={sms} outreach={outreach} campaigns={campaigns} settings={settings} />}
     </div>
   );
 }

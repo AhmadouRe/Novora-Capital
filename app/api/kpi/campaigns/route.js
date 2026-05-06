@@ -42,6 +42,7 @@ export async function POST(request) {
     counties: Array.isArray(body.counties) ? body.counties.map(s => clean(s)).filter(Boolean) : [],
     startDate,
     status: body.status || 'active',
+    contacts: Math.max(0, parseInt(String(body.contacts||'').replace(/[^0-9]/g,''))||0),
     createdBy: session.userName,
     createdAt: new Date().toISOString(),
     deleted: false,

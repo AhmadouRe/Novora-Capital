@@ -40,22 +40,6 @@ function getWeekStart(dateStr) {
   return d.toISOString().slice(0, 10);
 }
 
-const PACE_START = '2026-04-25';
-const PACE_END   = '2026-07-25';
-const PACE_GOAL  = 6;
-
-function paceInfo(contracts) {
-  const now   = new Date();
-  const start = new Date(PACE_START);
-  const end   = new Date(PACE_END);
-  const totalDays   = Math.round((end - start) / 86400000);
-  const daysElapsed = Math.max(0, Math.round((now - start) / 86400000));
-  const daysLeft    = Math.max(0, Math.round((end - now) / 86400000));
-  const expectedNow = safeDiv(daysElapsed, totalDays) * PACE_GOAL;
-  const pace        = contracts >= expectedNow ? 'on' : 'behind';
-  const pct         = Math.min(100, safePct(daysElapsed, totalDays));
-  return { totalDays, daysElapsed, daysLeft, expectedNow, pace, pct };
-}
 
 // ─── StatCard ─────────────────────────────────────────────────────────────────
 function StatCard({ label, value, color }) {
@@ -722,8 +706,20 @@ function PipelineTab({ sms, outreach, campaigns, settings, onRefresh }) {
         </div>
       )}
 
-      {/* Section 3: Daily Log */}
+      {/* Section 3: Texts Sent Today info + Daily Log */}
       <CalendarStrip entries={sms} accentColor={C.purple} />
+
+      {(() => {
+        const todayStr = today();
+        const textsSentToday = outreach.filter(o => !o.deleted && o.date === todayStr).reduce((s, o) => s + safeNum(o.textsSent || 0), 0);
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 8, background: C.s2, border: `1px solid ${C.bd}`, marginBottom: 14 }}>
+            <span style={{ fontSize: 13, color: C.t2 }}>Texts Sent Today (from Outreach):</span>
+            <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 18, fontWeight: 700, color: C.purple }}>{textsSentToday.toLocaleString()}</span>
+            {textsSentToday === 0 && <span style={{ fontSize: 12, color: C.t3 }}>— log outreach entries with today&apos;s date to populate</span>}
+          </div>
+        );
+      })()}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 600, color: C.tx }}>Daily Log ({sms.length} entries)</div>
@@ -826,8 +822,6 @@ function CombinedTab({ sms, outreach, campaigns, settings }) {
   const totalContacts  = campaigns.reduce((s, c) => s + (c.contacts || 0), 0);
   const activeLists    = outreach.filter(o => !o.deleted && (o.status === 'Active' || o.status === 'active')).length;
 
-  const pace = paceInfo(totalContracts);
-
   return (
     <div>
       {/* All-time SMS totals */}
@@ -853,10 +847,12 @@ function CombinedTab({ sms, outreach, campaigns, settings }) {
             <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, fontWeight: 600, color: C.tx }}>{row.value.toLocaleString()}</span>
           </div>
         ))}
-        <div style={{ marginTop: 10, fontSize: 12, color: C.t3 }}>
-          Reply Rate: <span style={{ color: C.purple, fontWeight: 600 }}>{fmtPct(totalPosReplies, totalSent)}</span>
-          &nbsp;·&nbsp;
-          Offer Rate: <span style={{ color: C.gold, fontWeight: 600 }}>{fmtPct(totalOffers, totalPosReplies)}</span>
+        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: C.t3 }}>
+          <span>Reply Rate: <span style={{ color: C.purple, fontWeight: 600 }}>{fmtPct(totalPosReplies, totalSent)}</span></span>
+          <span>Wants to Sell Rate: <span style={{ color: C.cyan, fontWeight: 600 }}>{totalPosReplies > 0 ? fmtPct(totalWantsToSell, totalPosReplies) : '—'}</span></span>
+          <span>Qualification Rate: <span style={{ color: C.green, fontWeight: 600 }}>{totalWantsToSell > 0 ? fmtPct(totalQualified, totalWantsToSell) : '—'}</span></span>
+          <span>Offer Rate: <span style={{ color: C.gold, fontWeight: 600 }}>{totalPosReplies > 0 ? fmtPct(totalOffers, totalPosReplies) : '—'}</span></span>
+          <span>Contract Rate: <span style={{ color: C.orange, fontWeight: 600 }}>{totalOffers > 0 ? fmtPct(totalContracts, totalOffers) : '—'}</span></span>
         </div>
       </div>
 
@@ -875,37 +871,6 @@ function CombinedTab({ sms, outreach, campaigns, settings }) {
         </div>
       </div>
 
-      {/* 90-day pace */}
-      <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${pace.pace === 'on' ? C.green : C.red}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: C.tx }}>90-Day Pace</div>
-          <span style={{
-            fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 6,
-            background: pace.pace === 'on' ? 'rgba(0,200,100,0.15)' : 'rgba(220,50,50,0.15)',
-            color: pace.pace === 'on' ? C.green : C.red,
-          }}>{pace.pace === 'on' ? '✓ On Pace' : '⚠ Behind Pace'}</span>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ flex: 1, height: 8, background: C.s2, borderRadius: 4, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${pace.pct}%`, background: pace.pace === 'on' ? C.green : C.red, borderRadius: 4 }} />
-          </div>
-          <span style={{ fontSize: 12, color: C.t3, whiteSpace: 'nowrap' }}>{pace.pct.toFixed(0)}% elapsed</span>
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
-          {[
-            { label: 'Goal',         value: PACE_GOAL,                     color: C.gold },
-            { label: 'Actual',       value: totalContracts,                 color: pace.pace === 'on' ? C.green : C.red },
-            { label: 'Expected Now', value: pace.expectedNow.toFixed(1),    color: C.t2 },
-            { label: 'Days Left',    value: pace.daysLeft,                  color: C.cyan },
-          ].map(item => (
-            <div key={item.label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 20, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: item.color }}>{item.value}</div>
-              <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{item.label}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ fontSize: 11, color: C.t3, marginTop: 10 }}>{PACE_START} → {PACE_END} · Goal: {PACE_GOAL} contracts</div>
-      </div>
     </div>
   );
 }

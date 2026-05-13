@@ -113,16 +113,15 @@ function TodayStrip({ sms }) {
   const sToday = sms.filter(e => e.date === todayStr);
 
   const nums = [
-    { label: 'Sent Today',         value: sToday.reduce((s, e) => s + safeNum(e.sent), 0),            color: C.purple },
-    { label: '+Replies Today',     value: sToday.reduce((s, e) => s + safeNum(e.positiveReplies), 0), color: C.green  },
-    { label: 'Wants to Sell Today',value: sToday.reduce((s, e) => s + safeNum(e.wantsToSell), 0),     color: C.cyan   },
-    { label: 'Qualified Today',    value: sToday.reduce((s, e) => s + safeNum(e.qualified), 0),        color: C.gold   },
-    { label: 'Offers Today',       value: sToday.reduce((s, e) => s + safeNum(e.offers), 0),           color: C.orange },
+    { label: 'Want to Sell Today', value: sToday.reduce((s, e) => s + safeNum(e.wantsToSell), 0), color: C.cyan   },
+    { label: 'Qualified Today',    value: sToday.reduce((s, e) => s + safeNum(e.qualified), 0),   color: C.gold   },
+    { label: 'Offers Today',       value: sToday.reduce((s, e) => s + safeNum(e.offers), 0),      color: C.orange },
+    { label: 'Contracts Today',    value: sToday.reduce((s, e) => s + safeNum(e.contracts), 0),   color: C.green  },
   ];
 
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10,
+      display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10,
       background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 10,
       padding: '12px 16px', marginBottom: 20,
     }}>
@@ -645,8 +644,8 @@ function CalendarStrip({ entries, accentColor }) {
 }
 
 // ─── PIPELINE TAB ─────────────────────────────────────────────────────────────
-const SMS_FIELDS = ['sent', 'positiveReplies', 'wantsToSell', 'qualified', 'offers', 'contracts'];
-const SMS_LABELS = { sent: 'Sent', positiveReplies: '+Replies', wantsToSell: 'Wants to Sell', qualified: 'Qualified', offers: 'Offers', contracts: 'Contracts' };
+const SMS_FIELDS = ['wantsToSell', 'qualified', 'offers', 'contracts'];
+const SMS_LABELS = { wantsToSell: 'Want to Sell', qualified: 'Qualified', offers: 'Offers Made', contracts: 'Contracts' };
 
 function PipelineTab({ sms, outreach, campaigns, settings, onRefresh }) {
   const [showForm, setShowForm] = useState(false);
@@ -732,10 +731,6 @@ function PipelineTab({ sms, outreach, campaigns, settings, onRefresh }) {
     return t;
   }, [sms]);
 
-  const metricsValues = useMemo(() => {
-    return { ...totals, sent: totalTextsSent };
-  }, [totals, totalTextsSent]);
-
   // Weekly data for chart
   const weeks = useMemo(() => {
     const map = {};
@@ -757,16 +752,15 @@ function PipelineTab({ sms, outreach, campaigns, settings, onRefresh }) {
     <div>
       {/* Section 1: Metrics Table */}
       <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.t3, marginBottom: 12 }}>All-Time SMS Totals</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: C.t3, marginBottom: 12 }}>All-Time Pipeline Totals</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8 }}>
           {SMS_FIELDS.map(f => (
             <div key={f} style={{ background: C.s2, border: `1px solid ${C.bd}`, borderRadius: 8, padding: '12px 8px', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{(metricsValues[f] || 0).toLocaleString()}</div>
-              <div style={{ fontSize: 10, color: C.t3, marginTop: 4, textTransform: 'capitalize' }}>{SMS_LABELS[f]}{f === 'sent' ? ' *' : ''}</div>
+              <div style={{ fontSize: 22, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{(totals[f] || 0).toLocaleString()}</div>
+              <div style={{ fontSize: 10, color: C.t3, marginTop: 4 }}>{SMS_LABELS[f]}</div>
             </div>
           ))}
         </div>
-        <div style={{ fontSize: 10, color: C.t3, marginTop: 6 }}>* Texts Sent sourced from Outreach list entries</div>
       </div>
 
       {/* Section 2: Weekly Chart */}
@@ -898,48 +892,116 @@ function PipelineTab({ sms, outreach, campaigns, settings, onRefresh }) {
 }
 
 // ─── COMBINED TAB ─────────────────────────────────────────────────────────────
-function CombinedTab({ sms, outreach, campaigns, settings }) {
-  const totalSent          = outreach.filter(o => !o.deleted).reduce((s, o) => s + safeNum(o.textsSent || 0), 0);
-  const totalPosReplies    = sms.reduce((s, e) => s + safeNum(e.positiveReplies), 0);
-  const totalWantsToSell   = sms.reduce((s, e) => s + safeNum(e.wantsToSell), 0);
-  const totalQualified     = sms.reduce((s, e) => s + safeNum(e.qualified), 0);
-  const totalOffers        = sms.reduce((s, e) => s + safeNum(e.offers), 0);
-  const totalContracts     = sms.reduce((s, e) => s + safeNum(e.contracts), 0);
+function CombinedTab({ sms, outreach, campaigns }) {
+  const totalSent        = outreach.filter(o => !o.deleted).reduce((s, o) => s + safeNum(o.textsSent || 0), 0);
+  const totalWantsToSell = sms.reduce((s, e) => s + safeNum(e.wantsToSell), 0);
+  const totalQualified   = sms.reduce((s, e) => s + safeNum(e.qualified), 0);
+  const totalOffers      = sms.reduce((s, e) => s + safeNum(e.offers), 0);
+  const totalContracts   = sms.reduce((s, e) => s + safeNum(e.contracts), 0);
 
-  const totalContacts  = campaigns.reduce((s, c) => s + (c.contacts || 0), 0);
-  const activeLists    = outreach.filter(o => !o.deleted && (o.status === 'Active' || o.status === 'active')).length;
+  const totalContacts = campaigns.reduce((s, c) => s + (c.contacts || 0), 0);
+  const activeLists   = outreach.filter(o => !o.deleted && (o.status === 'Active' || o.status === 'active')).length;
+
+  // Conversion rate helpers
+  const textsPerWTS   = totalWantsToSell > 0 && totalSent > 0 ? Math.round(totalSent / totalWantsToSell) : null;
+  const wtsToQualPct  = totalWantsToSell > 0 ? (totalQualified / totalWantsToSell) * 100 : null;
+  const qualToOfferPct= totalQualified   > 0 ? (totalOffers    / totalQualified)   * 100 : null;
+  const offerToContrPct= totalOffers > 0 ? (totalContracts / totalOffers) * 100 : null;
+
+  function healthColor(pct, greenT, yellowT) {
+    if (pct === null) return C.t3;
+    if (pct >= greenT)  return C.green;
+    if (pct >= yellowT) return C.gold;
+    return C.red;
+  }
+  function healthLabel(pct, greenT, yellowT) {
+    if (pct === null) return '';
+    if (pct >= greenT)  return '● Good';
+    if (pct >= yellowT) return '● Caution';
+    return '● Poor';
+  }
 
   return (
     <div>
-      {/* All-time SMS totals */}
+      {/* Top stat cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 24 }}>
         <StatCard label="Total Contracts" value={totalContracts} color={C.gold} />
         <StatCard label="Total Offers"    value={totalOffers}    color={C.cyan} />
-        <StatCard label="Total Sent"      value={totalSent.toLocaleString()} color={C.purple} />
+        <StatCard label="Total Texts Sent" value={totalSent.toLocaleString()} color={C.purple} />
       </div>
 
-      {/* SMS pipeline summary */}
+      {/* Pipeline volume summary */}
       <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.purple}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: C.purple, marginBottom: 12 }}>SMS Pipeline — All Time</div>
         {[
-          { label: 'Texts Sent',       value: totalSent },
-          { label: 'Positive Replies', value: totalPosReplies },
-          { label: 'Wants to Sell',    value: totalWantsToSell },
-          { label: 'Qualified',        value: totalQualified },
-          { label: 'Offers',           value: totalOffers },
-          { label: 'Contracts',        value: totalContracts },
+          { label: 'Texts Sent (from Outreach)', value: totalSent },
+          { label: 'Want to Sell',               value: totalWantsToSell },
+          { label: 'Qualified',                  value: totalQualified },
+          { label: 'Offers Made',                value: totalOffers },
+          { label: 'Contracts Signed',           value: totalContracts },
         ].map(row => (
-          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px solid ${C.bd}` }}>
+          <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${C.bd}` }}>
             <span style={{ fontSize: 13, color: C.t2 }}>{row.label}</span>
             <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 13, fontWeight: 600, color: C.tx }}>{row.value.toLocaleString()}</span>
           </div>
         ))}
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: '4px 14px', fontSize: 12, color: C.t3 }}>
-          <span>Reply Rate: <span style={{ color: C.purple, fontWeight: 600 }}>{fmtPct(totalPosReplies, totalSent)}</span></span>
-          <span>Wants to Sell Rate: <span style={{ color: C.cyan, fontWeight: 600 }}>{totalPosReplies > 0 ? fmtPct(totalWantsToSell, totalPosReplies) : '—'}</span></span>
-          <span>Qualification Rate: <span style={{ color: C.green, fontWeight: 600 }}>{totalWantsToSell > 0 ? fmtPct(totalQualified, totalWantsToSell) : '—'}</span></span>
-          <span>Offer Rate: <span style={{ color: C.gold, fontWeight: 600 }}>{totalPosReplies > 0 ? fmtPct(totalOffers, totalPosReplies) : '—'}</span></span>
-          <span>Contract Rate: <span style={{ color: C.orange, fontWeight: 600 }}>{totalOffers > 0 ? fmtPct(totalContracts, totalOffers) : '—'}</span></span>
+      </div>
+
+      {/* Conversion Rates */}
+      <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.gold}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.gold, marginBottom: 16 }}>Conversion Rates</div>
+
+        {/* 1. Texts → WTS */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: `1px solid ${C.bd}` }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.t2 }}>Texts → Want to Sell</div>
+            <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>How many texts to generate 1 WTS lead</div>
+          </div>
+          <span style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 16, fontWeight: 700, color: C.purple }}>
+            {textsPerWTS !== null ? `${textsPerWTS} texts per WTS lead` : '—'}
+          </span>
+        </div>
+
+        {/* 2. WTS → Qualified: ≥70% green · 40–69% yellow · <40% red */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: `1px solid ${C.bd}` }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.t2 }}>Want to Sell → Qualified</div>
+            <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>Target ≥70% · Caution 40–69% · Poor &lt;40%</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 22, fontWeight: 700, color: healthColor(wtsToQualPct, 70, 40) }}>
+              {wtsToQualPct !== null ? `${wtsToQualPct.toFixed(1)}%` : '—'}
+            </div>
+            {wtsToQualPct !== null && <div style={{ fontSize: 11, color: healthColor(wtsToQualPct, 70, 40), marginTop: 2 }}>{healthLabel(wtsToQualPct, 70, 40)}</div>}
+          </div>
+        </div>
+
+        {/* 3. Qualified → Offers: ≥90% green · 70–89% yellow · <70% red */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: `1px solid ${C.bd}` }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.t2 }}>Qualified → Offers Made</div>
+            <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>Target ≥90% · Caution 70–89% · Poor &lt;70%</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 22, fontWeight: 700, color: healthColor(qualToOfferPct, 90, 70) }}>
+              {qualToOfferPct !== null ? `${qualToOfferPct.toFixed(1)}%` : '—'}
+            </div>
+            {qualToOfferPct !== null && <div style={{ fontSize: 11, color: healthColor(qualToOfferPct, 90, 70), marginTop: 2 }}>{healthLabel(qualToOfferPct, 90, 70)}</div>}
+          </div>
+        </div>
+
+        {/* 4. Offers → Contracts: ≥10% green · 5–9% yellow · <5% red */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.t2 }}>Offers Made → Contracts Signed</div>
+            <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>Target ≥10% · Caution 5–9% · Poor &lt;5%</div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 22, fontWeight: 700, color: healthColor(offerToContrPct, 10, 5) }}>
+              {offerToContrPct !== null ? `${offerToContrPct.toFixed(1)}%` : '—'}
+            </div>
+            {offerToContrPct !== null && <div style={{ fontSize: 11, color: healthColor(offerToContrPct, 10, 5), marginTop: 2 }}>{healthLabel(offerToContrPct, 10, 5)}</div>}
+          </div>
         </div>
       </div>
 
@@ -957,7 +1019,6 @@ function CombinedTab({ sms, outreach, campaigns, settings }) {
           </div>
         </div>
       </div>
-
     </div>
   );
 }

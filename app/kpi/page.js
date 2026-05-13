@@ -145,8 +145,40 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
   const [deleteModal, setDeleteModal] = useState(null);
   const [deleteInput, setDeleteInput] = useState('');
   const [deleting, setDeleting]       = useState(false);
+  const [editingId, setEditingId]     = useState(null);
+  const [editForm, setEditForm]       = useState({ name: '', counties: '', contacts: '' });
+  const [editSaving, setEditSaving]   = useState(false);
+  const [editErr, setEditErr]         = useState('');
 
   function fv(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  function startEditCampaign(c) {
+    setEditingId(c.id);
+    setEditForm({
+      name: c.name || '',
+      counties: Array.isArray(c.counties) ? c.counties.join(', ') : '',
+      contacts: String(c.contacts || ''),
+    });
+    setEditErr('');
+  }
+
+  async function saveEditCampaign(c) {
+    if (!editForm.name.trim()) { setEditErr('Name is required'); return; }
+    setEditSaving(true); setEditErr('');
+    try {
+      const r = await fetch(`/api/kpi/campaigns/${c.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: editForm.name.trim(),
+          counties: editForm.counties.split(',').map(s => s.trim()).filter(Boolean),
+          contacts: parseInt(editForm.contacts) || 0,
+        }),
+      });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Failed'); }
+      setEditingId(null); onRefresh();
+    } catch (e) { setEditErr(e.message); }
+    finally { setEditSaving(false); }
+  }
 
   async function submit(e) {
     e.preventDefault(); setSaving(true); setErr('');
@@ -247,12 +279,60 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
           const totalOffers        = cSms.reduce((s, e) => s + safeNum(e.offers), 0);
           const totalContracts     = cSms.reduce((s, e) => s + safeNum(e.contracts), 0);
 
+          const isEditing = editingId === c.id;
           return (
             <div key={c.id} style={{
-              background: C.sf, border: `1px solid ${C.bd}`,
-              borderLeft: `3px solid ${c.status === 'active' ? C.green : C.t3}`,
+              background: C.sf, border: `1px solid ${isEditing ? C.gold : C.bd}`,
+              borderLeft: `3px solid ${isEditing ? C.gold : c.status === 'active' ? C.green : C.t3}`,
               borderRadius: 10, padding: 18,
             }}>
+              {/* ── Inline edit form ── */}
+              {isEditing ? (
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: C.gold, marginBottom: 12 }}>Edit Campaign</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <div style={{ gridColumn: '1/-1' }}>
+                      <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Campaign Name *</label>
+                      <input
+                        autoFocus
+                        value={editForm.name}
+                        onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                        style={{ width: '100%', background: C.s3, border: `1px solid ${C.gold}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEditCampaign(c); if (e.key === 'Escape') setEditingId(null); }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Counties (comma-separated)</label>
+                      <input
+                        value={editForm.counties}
+                        onChange={e => setEditForm(f => ({ ...f, counties: e.target.value }))}
+                        placeholder="e.g. Orange, Los Angeles"
+                        style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 4 }}>Contacts Loaded</label>
+                      <input
+                        type="text" inputMode="numeric"
+                        value={editForm.contacts}
+                        onChange={e => setEditForm(f => ({ ...f, contacts: e.target.value.replace(/[^0-9]/g, '') }))}
+                        style={{ width: '100%', background: C.s3, border: `1px solid ${C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box' }}
+                      />
+                    </div>
+                  </div>
+                  {editErr && <div style={{ color: C.red, fontSize: 13, marginBottom: 8 }}>{editErr}</div>}
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => saveEditCampaign(c)} disabled={editSaving} style={{
+                      background: C.gold, color: '#000', border: 'none', borderRadius: 7,
+                      padding: '8px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer', minHeight: 38,
+                    }}>{editSaving ? 'Saving…' : 'Save'}</button>
+                    <button onClick={() => setEditingId(null)} style={{
+                      background: C.s3, color: C.t2, border: `1px solid ${C.bd}`, borderRadius: 7,
+                      padding: '8px 16px', fontSize: 13, cursor: 'pointer', minHeight: 38,
+                    }}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
                 <div>
                   <div style={{ fontSize: 16, fontWeight: 700, color: C.tx }}>{c.name}</div>
@@ -266,6 +346,10 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
                     color: c.status === 'active' ? C.green : C.t3,
                     borderRadius: 6, padding: '4px 10px', fontSize: 12, fontWeight: 600,
                   }}>{c.status}</span>
+                  <button onClick={() => startEditCampaign(c)} style={{
+                    background: C.s2, color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 6,
+                    padding: '6px 12px', fontSize: 12, cursor: 'pointer', minHeight: 34, fontWeight: 600,
+                  }}>✎ Edit</button>
                   <button onClick={() => toggleStatus(c)} style={{
                     background: C.s2, color: C.t2, border: `1px solid ${C.bd}`, borderRadius: 6,
                     padding: '6px 12px', fontSize: 12, cursor: 'pointer', minHeight: 34,
@@ -276,20 +360,23 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
                   }}>Delete</button>
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginTop: 14 }}>
-                {[
-                  { label: 'Contacts',      value: totalContacts.toLocaleString(),    color: C.cyan   },
-                  { label: '+Replies',      value: totalPosReplies.toLocaleString(),   color: C.green  },
-                  { label: 'Wants to Sell', value: totalWantsToSell.toLocaleString(),  color: C.purple },
-                  { label: 'Offers',        value: totalOffers.toLocaleString(),       color: C.gold   },
-                  { label: 'Contracts',     value: totalContracts.toLocaleString(),    color: C.orange },
-                ].map(st => (
-                  <div key={st.label} style={{ background: C.s2, borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
-                    <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: st.color }}>{st.value}</div>
-                    <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{st.label}</div>
-                  </div>
-                ))}
-              </div>
+              )}
+              {!isEditing && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10, marginTop: 14 }}>
+                  {[
+                    { label: 'Contacts',      value: totalContacts.toLocaleString(),    color: C.cyan   },
+                    { label: '+Replies',      value: totalPosReplies.toLocaleString(),   color: C.green  },
+                    { label: 'Wants to Sell', value: totalWantsToSell.toLocaleString(),  color: C.purple },
+                    { label: 'Offers',        value: totalOffers.toLocaleString(),       color: C.gold   },
+                    { label: 'Contracts',     value: totalContracts.toLocaleString(),    color: C.orange },
+                  ].map(st => (
+                    <div key={st.label} style={{ background: C.s2, borderRadius: 8, padding: '10px 12px', textAlign: 'center' }}>
+                      <div style={{ fontSize: 18, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: st.color }}>{st.value}</div>
+                      <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{st.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}

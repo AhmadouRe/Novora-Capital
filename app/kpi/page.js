@@ -148,6 +148,11 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
   const [editForm, setEditForm]       = useState({ name: '', counties: '', contacts: '' });
   const [editSaving, setEditSaving]   = useState(false);
   const [editErr, setEditErr]         = useState('');
+  const [mergeModal, setMergeModal]   = useState(null); // source campaign
+  const [mergeTarget, setMergeTarget] = useState('');
+  const [merging, setMerging]         = useState(false);
+  const [mergeErr, setMergeErr]       = useState('');
+  const [mergePreview, setMergePreview] = useState(null); // { outreach, sms } counts
 
   function fv(k, v) { setForm(f => ({ ...f, [k]: v })); }
 
@@ -177,6 +182,30 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
       setEditingId(null); onRefresh();
     } catch (e) { setEditErr(e.message); }
     finally { setEditSaving(false); }
+  }
+
+  function openMerge(c) {
+    setMergeModal(c);
+    setMergeTarget('');
+    setMergeErr('');
+    // Pre-count entries for this campaign
+    const oCount = outreach.filter(o => o.campaignId === c.id).length;
+    const sCount = sms.filter(e => e.campaignId === c.id).length;
+    setMergePreview({ outreach: oCount, sms: sCount });
+  }
+
+  async function doMerge() {
+    if (!mergeTarget) { setMergeErr('Select a campaign to merge into'); return; }
+    setMerging(true); setMergeErr('');
+    try {
+      const r = await fetch(`/api/kpi/campaigns/${mergeModal.id}/merge`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId: mergeTarget }),
+      });
+      if (!r.ok) { const d = await r.json(); throw new Error(d.error || 'Merge failed'); }
+      setMergeModal(null); setMergeTarget(''); onRefresh();
+    } catch (e) { setMergeErr(e.message); }
+    finally { setMerging(false); }
   }
 
   async function submit(e) {
@@ -349,6 +378,12 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
                     background: C.s2, color: C.gold, border: `1px solid ${C.gold}`, borderRadius: 6,
                     padding: '6px 12px', fontSize: 12, cursor: 'pointer', minHeight: 34, fontWeight: 600,
                   }}>✎ Edit</button>
+                  {campaigns.length > 1 && (
+                    <button onClick={() => openMerge(c)} style={{
+                      background: C.s2, color: C.purple, border: `1px solid ${C.purple}`, borderRadius: 6,
+                      padding: '6px 12px', fontSize: 12, cursor: 'pointer', minHeight: 34, fontWeight: 600,
+                    }}>⇄ Merge</button>
+                  )}
                   <button onClick={() => toggleStatus(c)} style={{
                     background: C.s2, color: C.t2, border: `1px solid ${C.bd}`, borderRadius: 6,
                     padding: '6px 12px', fontSize: 12, cursor: 'pointer', minHeight: 34,
@@ -380,6 +415,64 @@ function CampaignsTab({ campaigns, outreach, sms, onRefresh }) {
           );
         })}
       </div>
+
+      {/* ── Merge Modal ── */}
+      {mergeModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
+          <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderRadius: 14, padding: 32, maxWidth: 460, width: '90%' }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: C.tx, marginBottom: 6 }}>Merge Campaign</div>
+            <div style={{ fontSize: 13, color: C.t2, marginBottom: 18, lineHeight: 1.6 }}>
+              <strong style={{ color: C.purple }}>{mergeModal.name}</strong> will be deleted and all of its data moved into the campaign you choose below.
+            </div>
+
+            {/* Preview counts */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 18 }}>
+              <div style={{ flex: 1, background: C.s2, borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
+                <div style={{ fontSize: 20, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.cyan }}>{mergePreview?.outreach ?? 0}</div>
+                <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>Outreach entries</div>
+              </div>
+              <div style={{ flex: 1, background: C.s2, borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
+                <div style={{ fontSize: 20, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.purple }}>{mergePreview?.sms ?? 0}</div>
+                <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>Pipeline entries</div>
+              </div>
+              <div style={{ flex: 1, background: C.s2, borderRadius: 8, padding: '10px 14px', textAlign: 'center' }}>
+                <div style={{ fontSize: 20, fontFamily: 'JetBrains Mono,monospace', fontWeight: 700, color: C.gold }}>{(mergeModal.contacts || 0).toLocaleString()}</div>
+                <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>Contacts (added)</div>
+              </div>
+            </div>
+
+            <label style={{ fontSize: 12, color: C.t2, display: 'block', marginBottom: 6 }}>Merge INTO this campaign:</label>
+            <select
+              value={mergeTarget}
+              onChange={e => setMergeTarget(e.target.value)}
+              style={{ width: '100%', background: C.s3, border: `1px solid ${mergeTarget ? C.purple : C.bd}`, borderRadius: 6, padding: '10px 12px', color: C.tx, fontSize: 14, boxSizing: 'border-box', marginBottom: 6 }}
+            >
+              <option value="">— select target campaign —</option>
+              {campaigns.filter(c => c.id !== mergeModal.id).map(c => (
+                <option key={c.id} value={c.id}>{c.name} ({(c.contacts||0).toLocaleString()} contacts)</option>
+              ))}
+            </select>
+            {mergeTarget && (
+              <div style={{ fontSize: 12, color: C.t3, marginBottom: 14 }}>
+                After merge, contacts will be combined: {(mergeModal.contacts||0).toLocaleString()} + {(campaigns.find(c=>c.id===mergeTarget)?.contacts||0).toLocaleString()} = {((mergeModal.contacts||0)+(campaigns.find(c=>c.id===mergeTarget)?.contacts||0)).toLocaleString()}. You can edit this afterward.
+              </div>
+            )}
+            {mergeErr && <div style={{ color: C.red, fontSize: 13, marginBottom: 10 }}>{mergeErr}</div>}
+            <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
+              <button onClick={doMerge} disabled={!mergeTarget || merging} style={{
+                background: mergeTarget ? C.purple : C.s3,
+                color: mergeTarget ? '#fff' : C.t3,
+                border: 'none', borderRadius: 8, padding: '10px 24px', fontSize: 14, fontWeight: 600,
+                cursor: mergeTarget ? 'pointer' : 'not-allowed', minHeight: 46,
+              }}>{merging ? 'Merging…' : 'Confirm Merge'}</button>
+              <button onClick={() => { setMergeModal(null); setMergeTarget(''); setMergeErr(''); }} style={{
+                background: C.s2, color: C.t2, border: `1px solid ${C.bd}`, borderRadius: 8,
+                padding: '10px 20px', fontSize: 14, cursor: 'pointer', minHeight: 46,
+              }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {deleteModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999 }}>
@@ -892,12 +985,15 @@ function PipelineTab({ sms, outreach, campaigns, settings, onRefresh }) {
 }
 
 // ─── COMBINED TAB ─────────────────────────────────────────────────────────────
-function CombinedTab({ sms, outreach, campaigns }) {
+function CombinedTab({ sms, outreach, campaigns, settings }) {
   const totalSent        = outreach.filter(o => !o.deleted).reduce((s, o) => s + safeNum(o.textsSent || 0), 0);
   const totalWantsToSell = sms.reduce((s, e) => s + safeNum(e.wantsToSell), 0);
   const totalQualified   = sms.reduce((s, e) => s + safeNum(e.qualified), 0);
   const totalOffers      = sms.reduce((s, e) => s + safeNum(e.offers), 0);
   const totalContracts   = sms.reduce((s, e) => s + safeNum(e.contracts), 0);
+
+  const smsCostPerText = safeNum(settings?.smsCostPerText) || 0.04;
+  const totalSmsCost   = totalSent * smsCostPerText;
 
   const totalContacts = campaigns.reduce((s, c) => s + (c.contacts || 0), 0);
   const activeLists   = outreach.filter(o => !o.deleted && (o.status === 'Active' || o.status === 'active')).length;
@@ -1003,6 +1099,44 @@ function CombinedTab({ sms, outreach, campaigns }) {
             {offerToContrPct !== null && <div style={{ fontSize: 11, color: healthColor(offerToContrPct, 10, 5), marginTop: 2 }}>{healthLabel(offerToContrPct, 10, 5)}</div>}
           </div>
         </div>
+      </div>
+
+      {/* Cost Per Lead Metrics */}
+      <div style={{ background: C.sf, border: `1px solid ${C.bd}`, borderLeft: `3px solid ${C.green}`, borderRadius: 10, padding: 18, marginBottom: 24 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: C.green, marginBottom: 6 }}>Cost Per Lead Metrics</div>
+        <div style={{ fontSize: 12, color: C.t3, marginBottom: 16 }}>
+          Total SMS spend: {totalSent.toLocaleString()} texts × ${smsCostPerText.toFixed(4)}/text = <strong style={{ color: C.green }}>${totalSmsCost.toFixed(2)}</strong>
+        </div>
+        {[
+          {
+            label: '$ per Qualified Lead',
+            sub: 'Total SMS cost ÷ Qualified',
+            value: totalQualified > 0 ? totalSmsCost / totalQualified : null,
+          },
+          {
+            label: '$ per Offer Made',
+            sub: 'Total SMS cost ÷ Offers Made',
+            value: totalOffers > 0 ? totalSmsCost / totalOffers : null,
+          },
+          {
+            label: '$ per Contract Signed',
+            sub: 'Total SMS cost ÷ Contracts Signed',
+            value: totalContracts > 0 ? totalSmsCost / totalContracts : null,
+          },
+        ].map((row, i, arr) => (
+          <div key={row.label} style={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '12px 0', borderBottom: i < arr.length - 1 ? `1px solid ${C.bd}` : 'none',
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.t2 }}>{row.label}</div>
+              <div style={{ fontSize: 11, color: C.t3, marginTop: 2 }}>{row.sub}</div>
+            </div>
+            <div style={{ fontFamily: 'JetBrains Mono,monospace', fontSize: 22, fontWeight: 700, color: C.green }}>
+              {row.value !== null ? `$${row.value.toFixed(2)}` : '—'}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Outreach summary */}
